@@ -6,6 +6,17 @@ Just some dead simple sugar on top of git worktree in Bash.
 
 Just copy it to ur PATH
 
+## Flow
+
+An actual workflow will be something like this:
+
+```
+git wt switch -c fancy-new-feature
+# do ur changes
+# create a PR, or merge the branch from main
+git wt purge # ⚠️ this destroy the wt and the branch. 
+```
+
 ## Usage
 
 ```
