@@ -9,22 +9,23 @@ Requirements: `git`, `bash`.
 Clone:
 
 ```
-ghq get git@github.com:khoi/git-wt.git
+git clone https://github.com/khoi/git-wt.git
+cd git-wt
 ```
 
-Link into your PATH:
+Install:
 
 ```
-ln -sf ~/Developer/code/github.com/khoi/git-wt/git-wt ~/.bin/git-wt
+./install.sh
 ```
 
-Ensure `~/.bin` is on your `PATH`, then use:
+Custom prefix:
 
 ```
-git wt new
-git wt list
-git wt ls
+PREFIX=~/.local ./install.sh
 ```
+
+Ensure your chosen `bin` directory is on your `PATH`.
 
 ## Commands
 
