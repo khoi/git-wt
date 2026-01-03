@@ -1,6 +1,6 @@
 # git-wt
 
-Just some dead simple sugar on top of git worktree in Bash.
+Just some dead simple sugar on top of git worktree with fzf.
 
 ## Installation
 
