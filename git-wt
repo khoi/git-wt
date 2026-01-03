@@ -154,6 +154,21 @@ git_list() {
 }
 
 git_purge() {
+  while [ "${#}" -gt 0 ]; do
+    case "${1}" in
+    -h | --help)
+      purge_usage
+      exit 0
+      ;;
+    *)
+      echo "error: unexpected argument '${1}'" >&2
+      purge_usage
+      exit 1
+      ;;
+    esac
+    shift
+  done
+
   require_repo >/dev/null
   CURRENT=$(git rev-parse --show-toplevel)
   MAIN=$(main_worktree_path)
@@ -238,7 +253,7 @@ switch)
   git_switch "${@:2}"
   ;;
 purge)
-  git_purge
+  git_purge "${@:2}"
   ;;
 *)
   echo "error: unknown command '${1}'" >&2
