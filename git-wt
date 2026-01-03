@@ -5,6 +5,7 @@ usage() {
 Examples:
   git-wt switch -c feature
   git-wt switch feature
+  git-wt switch
   git-wt purge
   git-wt list
   git-wt help
@@ -28,9 +29,10 @@ switch_usage() {
 Examples:
   git-wt switch -c feature
   git-wt switch feature
+  git-wt switch
 
 Usage:
-  git-wt switch [-c|--create] <feature>
+  git-wt switch [-c|--create] [<feature>]
 USAGE
 }
 
@@ -87,6 +89,20 @@ worktree_exists() {
   return 1
 }
 
+list_features() {
+  BASE=$(main_worktree_path)
+  PREFIX="${BASE}/.worktrees/"
+  while read -r KEY VALUE; do
+    if [ "${KEY}" = "worktree" ]; then
+      case "${VALUE}" in
+      "${PREFIX}"*)
+        printf '%s\n' "${VALUE#${PREFIX}}"
+        ;;
+      esac
+    fi
+  done < <(git worktree list --porcelain)
+}
+
 git_switch() {
   CREATE=0
   NAME=""
@@ -113,9 +129,16 @@ git_switch() {
   done
 
   if [ -z "${NAME}" ]; then
-    echo "error: missing feature name" >&2
-    switch_usage
-    exit 1
+    if [ -t 0 ] && command -v fzf >/dev/null 2>&1; then
+      NAME=$(list_features | fzf)
+      if [ -z "${NAME}" ]; then
+        exit 1
+      fi
+    else
+      echo "error: missing feature name" >&2
+      switch_usage
+      exit 1
+    fi
   fi
 
   BASE=$(main_worktree_path)

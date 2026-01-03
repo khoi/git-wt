@@ -22,6 +22,7 @@ git wt purge # ⚠️ this destroy the wt and the branch.
 ```
 git wt switch -c <feature>  create worktree and cd into it
 git wt switch <feature>     cd into existing worktree
+git wt switch               pick worktree via fzf
 git wt purge                delete current worktree and branch, cd to main
 git wt list                 list worktrees
 git wt ls                   alias for list
