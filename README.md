@@ -13,19 +13,19 @@ git clone https://github.com/khoi/git-wt.git
 cd git-wt
 ```
 
-Install:
+Install to a directory on your `PATH`:
 
 ```
-./install.sh
+install -m 755 git-wt /usr/local/bin/git-wt
 ```
 
-Custom prefix:
+If you do not have permission for `/usr/local/bin`, use a user-local bin:
 
 ```
-PREFIX=~/.local ./install.sh
+install -m 755 git-wt ~/.local/bin/git-wt
 ```
 
-Ensure your chosen `bin` directory is on your `PATH`.
+Ensure the chosen `bin` directory is on your `PATH`.
 
 ## Commands
 
