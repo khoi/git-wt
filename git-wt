@@ -1,11 +1,10 @@
 #!/bin/bash
 
 usage() {
-cat <<'USAGE'
+  cat <<'USAGE'
 Examples:
   git-wt new
-  git-wt list
-  git-wt ls
+  git-wt list (alias ls)
   git-wt help
 
 Usage:
@@ -13,8 +12,7 @@ Usage:
 
 Commands:
   new   create a new worktree and cd into it
-  list  list worktrees
-  ls    alias for list
+  list (ls)  list worktrees
   help  show help for a command
 
 Flags:
@@ -23,7 +21,7 @@ USAGE
 }
 
 new_usage() {
-cat <<'USAGE'
+  cat <<'USAGE'
 Examples:
   git-wt new
 
@@ -33,7 +31,7 @@ USAGE
 }
 
 list_usage() {
-cat <<'USAGE'
+  cat <<'USAGE'
 Examples:
   git-wt list
   git-wt ls
@@ -44,127 +42,127 @@ USAGE
 }
 
 require_repo() {
-    DIR=$(git rev-parse --git-dir 2>/dev/null || true)
-    if [ -z "${DIR}" ]; then
-        echo "error: not a git repository" >&2
-        exit 1
-    fi
-    printf '%s\n' "${DIR}"
+  DIR=$(git rev-parse --git-dir 2>/dev/null || true)
+  if [ -z "${DIR}" ]; then
+    echo "error: not a git repository" >&2
+    exit 1
+  fi
+  printf '%s\n' "${DIR}"
 }
 
 git_new() {
-    GIT_DIR=$(require_repo)
+  GIT_DIR=$(require_repo)
 
-    if [[ "${GIT_DIR}" == *"/worktrees/"* ]]; then
-        MAIN_WORKTREE=""
-        while read -r KEY VALUE; do
-            if [ "${KEY}" = "worktree" ]; then
-                MAIN_WORKTREE="${VALUE}"
-                break
-            fi
-        done < <(git worktree list --porcelain)
-        if [ -n "${MAIN_WORKTREE}" ]; then
-            cd "${MAIN_WORKTREE}"
-        fi
+  if [[ "${GIT_DIR}" == *"/worktrees/"* ]]; then
+    MAIN_WORKTREE=""
+    while read -r KEY VALUE; do
+      if [ "${KEY}" = "worktree" ]; then
+        MAIN_WORKTREE="${VALUE}"
+        break
+      fi
+    done < <(git worktree list --porcelain)
+    if [ -n "${MAIN_WORKTREE}" ]; then
+      cd "${MAIN_WORKTREE}"
     fi
+  fi
 
-    if [ -f /usr/share/dict/words ]; then
-        WORD=$(sort -R /usr/share/dict/words | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d "'")
+  if [ -f /usr/share/dict/words ]; then
+    WORD=$(sort -R /usr/share/dict/words | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d "'")
+  else
+    WORD=$(LC_ALL=C tr -dc 'a-z' </dev/urandom | head -c 8)
+  fi
+
+  mkdir -p .worktrees
+
+  WORKTREE_PATH=".worktrees/${WORD}"
+  BRANCH_NAME="wt/${WORD}"
+
+  if git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}"; then
+    ABSOLUTE_PATH="$(pwd)/${WORKTREE_PATH}"
+    if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+      cd "${ABSOLUTE_PATH}"
     else
-        WORD=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 8)
+      cd "${ABSOLUTE_PATH}" && exec "${SHELL:-/bin/bash}"
     fi
-
-    mkdir -p .worktrees
-
-    WORKTREE_PATH=".worktrees/${WORD}"
-    BRANCH_NAME="wt/${WORD}"
-
-    if git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}"; then
-        ABSOLUTE_PATH="$(pwd)/${WORKTREE_PATH}"
-        if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
-            cd "${ABSOLUTE_PATH}"
-        else
-            cd "${ABSOLUTE_PATH}" && exec "${SHELL:-/bin/bash}"
-        fi
-    else
-        exit 1
-    fi
+  else
+    exit 1
+  fi
 }
 
 git_list() {
-    GIT_DIR=$(require_repo)
-    git worktree list
+  GIT_DIR=$(require_repo)
+  git worktree list
 }
 
 case "${1}" in
-    "")
-        usage
-        exit 1
-        ;;
-    -h|--help)
-        usage
-        exit 0
-        ;;
-    help)
-        if [ -z "${2}" ]; then
-            usage
-            exit 0
-        fi
-        case "${2}" in
-            new)
-                new_usage
-                exit 0
-                ;;
-            list)
-                list_usage
-                exit 0
-                ;;
-            -h|--help)
-                usage
-                exit 0
-                ;;
-            *)
-                echo "error: unknown command '${2}'" >&2
-                usage
-                exit 1
-                ;;
-        esac
-        ;;
-    list|ls)
-        case "${2}" in
-            "")
-                git_list
-                ;;
-            -h|--help)
-                list_usage
-                exit 0
-                ;;
-            *)
-                echo "error: unexpected argument '${2}'" >&2
-                list_usage
-                exit 1
-                ;;
-        esac
-        ;;
-    new)
-        case "${2}" in
-            "")
-                git_new
-                ;;
-            -h|--help)
-                new_usage
-                exit 0
-                ;;
-            *)
-                echo "error: unexpected argument '${2}'" >&2
-                new_usage
-                exit 1
-                ;;
-        esac
-        ;;
-    *)
-        echo "error: unknown command '${1}'" >&2
-        usage
-        exit 1
-        ;;
+"")
+  usage
+  exit 1
+  ;;
+-h | --help)
+  usage
+  exit 0
+  ;;
+help)
+  if [ -z "${2}" ]; then
+    usage
+    exit 0
+  fi
+  case "${2}" in
+  new)
+    new_usage
+    exit 0
+    ;;
+  list)
+    list_usage
+    exit 0
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "error: unknown command '${2}'" >&2
+    usage
+    exit 1
+    ;;
+  esac
+  ;;
+list | ls)
+  case "${2}" in
+  "")
+    git_list
+    ;;
+  -h | --help)
+    list_usage
+    exit 0
+    ;;
+  *)
+    echo "error: unexpected argument '${2}'" >&2
+    list_usage
+    exit 1
+    ;;
+  esac
+  ;;
+new)
+  case "${2}" in
+  "")
+    git_new
+    ;;
+  -h | --help)
+    new_usage
+    exit 0
+    ;;
+  *)
+    echo "error: unexpected argument '${2}'" >&2
+    new_usage
+    exit 1
+    ;;
+  esac
+  ;;
+*)
+  echo "error: unknown command '${1}'" >&2
+  usage
+  exit 1
+  ;;
 esac
