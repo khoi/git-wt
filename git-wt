@@ -3,15 +3,18 @@
 usage() {
   cat <<'USAGE'
 Examples:
-  git-wt new
-  git-wt list (alias ls)
+  git-wt switch -c feature
+  git-wt switch feature
+  git-wt purge
+  git-wt list
   git-wt help
 
 Usage:
   git-wt <command>
 
 Commands:
-  new   create a new worktree and cd into it
+  switch  switch to a worktree and cd into it, create with -c
+  purge   delete current worktree and branch, cd to main
   list (ls)  list worktrees
   help  show help for a command
 
@@ -20,13 +23,14 @@ Flags:
 USAGE
 }
 
-new_usage() {
+switch_usage() {
   cat <<'USAGE'
 Examples:
-  git-wt new
+  git-wt switch -c feature
+  git-wt switch feature
 
 Usage:
-  git-wt new
+  git-wt switch [-c|--create] <feature>
 USAGE
 }
 
@@ -41,6 +45,16 @@ Usage:
 USAGE
 }
 
+purge_usage() {
+  cat <<'USAGE'
+Examples:
+  git-wt purge
+
+Usage:
+  git-wt purge
+USAGE
+}
+
 require_repo() {
   DIR=$(git rev-parse --git-dir 2>/dev/null || true)
   if [ -z "${DIR}" ]; then
@@ -50,48 +64,120 @@ require_repo() {
   printf '%s\n' "${DIR}"
 }
 
-git_new() {
+main_worktree_path() {
   GIT_DIR=$(require_repo)
-
   if [[ "${GIT_DIR}" == *"/worktrees/"* ]]; then
-    MAIN_WORKTREE=""
     while read -r KEY VALUE; do
       if [ "${KEY}" = "worktree" ]; then
-        MAIN_WORKTREE="${VALUE}"
-        break
+        printf '%s\n' "${VALUE}"
+        return
       fi
     done < <(git worktree list --porcelain)
-    if [ -n "${MAIN_WORKTREE}" ]; then
-      cd "${MAIN_WORKTREE}"
-    fi
   fi
+  git rev-parse --show-toplevel
+}
 
-  if [ -f /usr/share/dict/words ]; then
-    WORD=$(sort -R /usr/share/dict/words | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d "'")
-  else
-    WORD=$(LC_ALL=C tr -dc 'a-z' </dev/urandom | head -c 8)
-  fi
-
-  mkdir -p .worktrees
-
-  WORKTREE_PATH=".worktrees/${WORD}"
-  BRANCH_NAME="wt/${WORD}"
-
-  if git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}"; then
-    ABSOLUTE_PATH="$(pwd)/${WORKTREE_PATH}"
-    if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
-      cd "${ABSOLUTE_PATH}"
-    else
-      cd "${ABSOLUTE_PATH}" && exec "${SHELL:-/bin/bash}"
+worktree_exists() {
+  TARGET="${1}"
+  while read -r KEY VALUE; do
+    if [ "${KEY}" = "worktree" ] && [ "${VALUE}" = "${TARGET}" ]; then
+      return 0
     fi
-  else
+  done < <(git worktree list --porcelain)
+  return 1
+}
+
+git_switch() {
+  CREATE=0
+  NAME=""
+  while [ "${#}" -gt 0 ]; do
+    case "${1}" in
+    -h | --help)
+      switch_usage
+      exit 0
+      ;;
+    -c | --create)
+      CREATE=1
+      ;;
+    *)
+      if [ -z "${NAME}" ]; then
+        NAME="${1}"
+      else
+        echo "error: unexpected argument '${1}'" >&2
+        switch_usage
+        exit 1
+      fi
+      ;;
+    esac
+    shift
+  done
+
+  if [ -z "${NAME}" ]; then
+    echo "error: missing feature name" >&2
+    switch_usage
     exit 1
   fi
+
+  BASE=$(main_worktree_path)
+  WORKTREE_PATH="${BASE}/.worktrees/${NAME}"
+  BRANCH_NAME="wt/${NAME}"
+
+  if worktree_exists "${WORKTREE_PATH}"; then
+    if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+      cd "${WORKTREE_PATH}"
+    else
+      cd "${WORKTREE_PATH}" && exec "${SHELL:-/bin/bash}"
+    fi
+    exit 0
+  fi
+
+  if [ "${CREATE}" -eq 1 ]; then
+    mkdir -p "${BASE}/.worktrees"
+    if git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}"; then
+      if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+        cd "${WORKTREE_PATH}"
+      else
+        cd "${WORKTREE_PATH}" && exec "${SHELL:-/bin/bash}"
+      fi
+      exit 0
+    fi
+    exit 1
+  fi
+
+  echo "error: worktree not found '${NAME}'" >&2
+  exit 1
 }
 
 git_list() {
-  GIT_DIR=$(require_repo)
+  require_repo >/dev/null
   git worktree list
+}
+
+git_purge() {
+  require_repo >/dev/null
+  CURRENT=$(git rev-parse --show-toplevel)
+  MAIN=$(main_worktree_path)
+
+  if [ "${CURRENT}" = "${MAIN}" ]; then
+    echo "error: not in a linked worktree" >&2
+    exit 1
+  fi
+
+  BRANCH=$(git symbolic-ref --quiet --short HEAD || true)
+  if [ -z "${BRANCH}" ]; then
+    echo "error: detached HEAD" >&2
+    exit 1
+  fi
+
+  cd "${MAIN}"
+  git worktree remove "${CURRENT}"
+  git branch -D "${BRANCH}"
+
+  if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    cd "${MAIN}"
+  else
+    cd "${MAIN}" && exec "${SHELL:-/bin/bash}"
+  fi
 }
 
 case "${1}" in
@@ -109,8 +195,12 @@ help)
     exit 0
   fi
   case "${2}" in
-  new)
-    new_usage
+  switch)
+    switch_usage
+    exit 0
+    ;;
+  purge)
+    purge_usage
     exit 0
     ;;
   list)
@@ -144,21 +234,11 @@ list | ls)
     ;;
   esac
   ;;
-new)
-  case "${2}" in
-  "")
-    git_new
-    ;;
-  -h | --help)
-    new_usage
-    exit 0
-    ;;
-  *)
-    echo "error: unexpected argument '${2}'" >&2
-    new_usage
-    exit 1
-    ;;
-  esac
+switch)
+  git_switch "${@:2}"
+  ;;
+purge)
+  git_purge
   ;;
 *)
   echo "error: unknown command '${1}'" >&2
