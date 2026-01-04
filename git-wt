@@ -20,7 +20,14 @@ Commands:
   help  show help for a command
 
 Flags:
+USAGE
+  common_flags_usage
+}
+
+common_flags_usage() {
+  cat <<'USAGE'
   -h, --help  show help
+  -b, --base <dir>  set base dir (overrides GIT_WT_BASE)
 USAGE
 }
 
@@ -33,7 +40,10 @@ Examples:
 
 Usage:
   git-wt switch [-c|--create] [<feature>]
+Flags:
+  -c, --create  create worktree
 USAGE
+  common_flags_usage
 }
 
 list_usage() {
@@ -44,7 +54,9 @@ Examples:
 
 Usage:
   git-wt list
+Flags:
 USAGE
+  common_flags_usage
 }
 
 purge_usage() {
@@ -54,7 +66,38 @@ Examples:
 
 Usage:
   git-wt purge
+Flags:
 USAGE
+  common_flags_usage
+}
+
+parse_global_flags() {
+  ARGS=()
+  while [ "${#}" -gt 0 ]; do
+    case "${1}" in
+    -b | --base)
+      if [ -z "${2}" ]; then
+        echo "error: missing base dir" >&2
+        usage
+        exit 1
+      fi
+      BASE_DIR_OVERRIDE="${2}"
+      shift
+      ;;
+    --base=*)
+      BASE_DIR_OVERRIDE="${1#--base=}"
+      if [ -z "${BASE_DIR_OVERRIDE}" ]; then
+        echo "error: missing base dir" >&2
+        usage
+        exit 1
+      fi
+      ;;
+    *)
+      ARGS+=("${1}")
+      ;;
+    esac
+    shift
+  done
 }
 
 require_repo() {
@@ -79,6 +122,28 @@ main_worktree_path() {
   git rev-parse --show-toplevel
 }
 
+worktree_base_dir() {
+  ROOT=$(main_worktree_path)
+  OVERRIDE="${GIT_WT_BASE}"
+  if [ -n "${BASE_DIR_OVERRIDE}" ]; then
+    OVERRIDE="${BASE_DIR_OVERRIDE}"
+  fi
+  if [ -z "${OVERRIDE}" ]; then
+    NAME=$(basename "${ROOT}")
+    PARENT=$(dirname "${ROOT}")
+    printf '%s\n' "${PARENT}/${NAME}-worktrees"
+    return
+  fi
+  case "${OVERRIDE}" in
+  /*)
+    printf '%s\n' "${OVERRIDE}"
+    ;;
+  *)
+    printf '%s\n' "${ROOT}/${OVERRIDE}"
+    ;;
+  esac
+}
+
 worktree_exists() {
   TARGET="${1}"
   while read -r KEY VALUE; do
@@ -90,8 +155,8 @@ worktree_exists() {
 }
 
 list_features() {
-  BASE=$(main_worktree_path)
-  PREFIX="${BASE}/.worktrees/"
+  BASE=$(worktree_base_dir)
+  PREFIX="${BASE}/"
   while read -r KEY VALUE; do
     if [ "${KEY}" = "worktree" ]; then
       case "${VALUE}" in
@@ -141,8 +206,8 @@ git_switch() {
     fi
   fi
 
-  BASE=$(main_worktree_path)
-  WORKTREE_PATH="${BASE}/.worktrees/${NAME}"
+  BASE=$(worktree_base_dir)
+  WORKTREE_PATH="${BASE}/${NAME}"
   BRANCH_NAME="wt/${NAME}"
 
   if worktree_exists "${WORKTREE_PATH}"; then
@@ -155,7 +220,7 @@ git_switch() {
   fi
 
   if [ "${CREATE}" -eq 1 ]; then
-    mkdir -p "${BASE}/.worktrees"
+    mkdir -p "${BASE}"
     if git worktree add -b "${BRANCH_NAME}" "${WORKTREE_PATH}"; then
       if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
         cd "${WORKTREE_PATH}"
@@ -217,6 +282,11 @@ git_purge() {
     cd "${MAIN}" && exec "${SHELL:-/bin/bash}"
   fi
 }
+
+BASE_DIR_OVERRIDE=""
+ARGS=()
+parse_global_flags "${@}"
+set -- "${ARGS[@]}"
 
 case "${1}" in
 "")

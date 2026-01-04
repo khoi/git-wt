@@ -27,3 +27,7 @@ git wt purge                delete current worktree and branch, cd to main
 git wt list                 list worktrees
 git wt ls                   alias for list
 ```
+
+## Base dir
+
+Default base dir is `../{gitroot}-worktrees`. Override with `--base <dir>` or `GIT_WT_BASE`. The flag wins.
