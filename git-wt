@@ -208,7 +208,7 @@ git_switch() {
 
   BASE=$(worktree_base_dir)
   WORKTREE_PATH="${BASE}/${NAME}"
-  BRANCH_NAME="wt/${NAME}"
+  BRANCH_NAME="${NAME}"
 
   if worktree_exists "${WORKTREE_PATH}"; then
     if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
