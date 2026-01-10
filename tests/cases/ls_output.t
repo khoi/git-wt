@@ -7,8 +7,8 @@ repo=$(new_repo)
 trap 'cleanup_repo "$repo"' EXIT
 
 cd "$repo"
-"$WT_BIN" open feat-1 --from main >/dev/null
-"$WT_BIN" open feat-2 --from main >/dev/null
+"$WT_BIN" switch feat-1 --from main >/dev/null
+"$WT_BIN" switch feat-2 --from main >/dev/null
 
 out=$("$WT_BIN" ls)
 assert_match "feat-1" "$out"

@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/khoi/git-wt/main/install.sh | sh
 Open or create a workspace:
 
 ```
-wt open feat-1 --from main
+wt switch feat-1 --from main
 ```
 
 Return to main worktree:
