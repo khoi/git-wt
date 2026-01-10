@@ -120,7 +120,10 @@ base_dir() {
     chosen="$override"
   fi
   if [ -z "$chosen" ]; then
-    abs_path "$root/.wt"
+    local name parent
+    name=$(basename "$root")
+    parent=$(dirname "$root")
+    abs_path "$parent/${name}_worktrees"
     return
   fi
   case "$chosen" in

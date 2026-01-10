@@ -30,7 +30,7 @@ wt help [command]
 
 ## Base dir
 
-Default: `<gitroot>/.wt`
+Default: `<gitroot>/../<gitroot_basename>_worktrees`
 
 Override with `--base <dir>` or `GIT_WT_BASE` (flag wins).
 
