@@ -1,8 +1,7 @@
 #!/bin/sh
 set -e
 
-repo=${GIT_WT_REPO:-"https://raw.githubusercontent.com/khoi/git-wt/main"}
-
+printf '%s\n' "wt: installing"
 dest=""
 for d in "$HOME/.local/bin" "/usr/local/bin" "/opt/homebrew/bin"; do
   if [ -d "$d" ] && [ -w "$d" ]; then
@@ -15,19 +14,35 @@ if [ -z "$dest" ]; then
 fi
 if [ -z "$dest" ]; then
   dest=${XDG_BIN_HOME:-"$HOME/.local/bin"}
-  mkdir -p "$dest"
+fi
+mkdir -p "$dest"
+printf '%s\n' "wt: target $dest"
+
+local_src=""
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  root=$(git rev-parse --show-toplevel)
+  if [ -f "$root/wt" ]; then
+    local_src="$root/wt"
+  fi
 fi
 
-tmp=$(mktemp)
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$repo/wt" -o "$tmp"
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$tmp" "$repo/wt"
+if [ -n "$local_src" ]; then
+  printf '%s\n' "wt: source local"
+  cp "$local_src" "$dest/wt"
 else
-  printf '%s\n' "error: curl or wget required" >&2
-  exit 1
+  repo=${GIT_WT_REPO:-"https://raw.githubusercontent.com/khoi/git-wt/main"}
+  tmp=$(mktemp)
+  if command -v curl >/dev/null 2>&1; then
+    printf '%s\n' "wt: source remote (curl)"
+    curl -fsSL "$repo/wt" -o "$tmp"
+  elif command -v wget >/dev/null 2>&1; then
+    printf '%s\n' "wt: source remote (wget)"
+    wget -qO "$tmp" "$repo/wt"
+  else
+    printf '%s\n' "error: curl or wget required" >&2
+    exit 1
+  fi
+  mv "$tmp" "$dest/wt"
 fi
-
-mv "$tmp" "$dest/wt"
 chmod +x "$dest/wt"
 printf 'installed %s\n' "$dest/wt"

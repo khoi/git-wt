@@ -14,6 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/khoi/git-wt/main/install.sh | sh
 
 ```
 wt open <branch> [--from <ref>] [--base <dir>] [--path <dir>] [--fetch]
+wt exec <branch> -- <cmd...>
 wt ls [--base <dir>] [--plain] [--json]
 wt rm <branch> [--force] [--base <dir>]
 wt here
@@ -52,6 +53,12 @@ Open or create a workspace:
 
 ```
 wt open feat-1 --from main
+```
+
+Run Codex directly in a workspace:
+
+```
+wt exec feat-1 -- codex
 ```
 
 Remove a workspace:

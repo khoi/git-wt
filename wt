@@ -10,6 +10,7 @@ Usage:
 
 Commands:
   open <branch>   create or open a workspace
+  exec <branch>   open a workspace and run a command
   ls              list workspaces
   rm <branch>     remove a workspace
   here            print current workspace branch
@@ -21,6 +22,19 @@ USAGE
 open_usage() {
   cat <<'USAGE'
 wt open <branch>
+
+Flags:
+  --from <ref>    base ref for new branch
+  --base <dir>    base dir override
+  --path <dir>    explicit worktree path
+  --fetch         fetch remotes before resolving --from
+  -h, --help      show help
+USAGE
+}
+
+exec_usage() {
+  cat <<'USAGE'
+wt exec <branch> -- <cmd...>
 
 Flags:
   --from <ref>    base ref for new branch
@@ -189,6 +203,50 @@ json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
+open_path() {
+  local branch="$1"
+  local from="$2"
+  local base_override="$3"
+  local path_override="$4"
+  local fetch="$5"
+  require_repo
+  local root base path
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "$base_override")
+  if [ -n "$path_override" ]; then
+    path=$(resolve_path "$root" "$path_override")
+  else
+    path=$(resolve_path "$root" "$base/$branch")
+  fi
+  local existing
+  if existing=$(find_worktree_by_branch "$root" "$branch"); then
+    printf '%s\n' "$existing"
+    return 0
+  fi
+  if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
+    if [ -z "$path_override" ]; then
+      die "branch exists without worktree: '$branch'"
+    fi
+    if find_worktree_by_path "$root" "$path" >/dev/null; then
+      die "worktree path already in use: '$path'"
+    fi
+    mkdir -p "$(dirname "$path")"
+    git -C "$root" worktree add "$path" "$branch" >/dev/null 2>&1
+    printf '%s\n' "$path"
+    return 0
+  fi
+  if [ "$fetch" -eq 1 ]; then
+    git -C "$root" fetch >/dev/null 2>&1
+  fi
+  if [ -z "$from" ]; then
+    from=$(git -C "$root" rev-parse HEAD)
+  fi
+  git -C "$root" rev-parse --verify "${from}^{commit}" >/dev/null 2>&1 || die "invalid --from ref '$from'"
+  mkdir -p "$(dirname "$path")"
+  git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null 2>&1
+  printf '%s\n' "$path"
+}
+
 cmd_open() {
   local from="" base_override="" path_override="" fetch=0 branch=""
   while [ "$#" -gt 0 ]; do
@@ -222,42 +280,54 @@ cmd_open() {
     shift
   done
   [ -n "$branch" ] || die "missing branch"
-  require_repo
-  local root base path
-  root=$(main_worktree_path)
-  base=$(base_dir "$root" "$base_override")
-  if [ -n "$path_override" ]; then
-    path=$(resolve_path "$root" "$path_override")
-  else
-    path=$(resolve_path "$root" "$base/$branch")
-  fi
-  local existing
-  if existing=$(find_worktree_by_branch "$root" "$branch"); then
-    printf '%s\n' "$existing"
-    exit 0
-  fi
-  if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
-    if [ -z "$path_override" ]; then
-      die "branch exists without worktree: '$branch'"
-    fi
-    if find_worktree_by_path "$root" "$path" >/dev/null; then
-      die "worktree path already in use: '$path'"
-    fi
-    mkdir -p "$(dirname "$path")"
-    git -C "$root" worktree add "$path" "$branch" >/dev/null 2>&1
-    printf '%s\n' "$path"
-    exit 0
-  fi
-  if [ "$fetch" -eq 1 ]; then
-    git -C "$root" fetch >/dev/null 2>&1
-  fi
-  if [ -z "$from" ]; then
-    from=$(git -C "$root" rev-parse HEAD)
-  fi
-  git -C "$root" rev-parse --verify "${from}^{commit}" >/dev/null 2>&1 || die "invalid --from ref '$from'"
-  mkdir -p "$(dirname "$path")"
-  git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null 2>&1
-  printf '%s\n' "$path"
+  open_path "$branch" "$from" "$base_override" "$path_override" "$fetch"
+}
+
+cmd_exec() {
+  local from="" base_override="" path_override="" fetch=0 branch=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    -h | --help)
+      exec_usage
+      exit 0
+      ;;
+    --from)
+      [ -n "${2:-}" ] || die "missing value for --from"
+      from="$2"
+      shift
+      ;;
+    --from=*) from="${1#--from=}" ;;
+    --base)
+      [ -n "${2:-}" ] || die "missing value for --base"
+      base_override="$2"
+      shift
+      ;;
+    --base=*) base_override="${1#--base=}" ;;
+    --path)
+      [ -n "${2:-}" ] || die "missing value for --path"
+      path_override="$2"
+      shift
+      ;;
+    --path=*) path_override="${1#--path=}" ;;
+    --fetch) fetch=1 ;;
+    --) shift; break ;;
+    --*) die "unknown flag '$1'" ;;
+    *)
+      if [ -z "$branch" ]; then
+        branch="$1"
+      else
+        die "missing -- before command"
+      fi
+      ;;
+    esac
+    shift
+  done
+  [ -n "$branch" ] || die "missing branch"
+  [ "$#" -gt 0 ] || die "missing command"
+  local path
+  path=$(open_path "$branch" "$from" "$base_override" "$path_override" "$fetch")
+  cd "$path"
+  exec "$@"
 }
 
 cmd_ls() {
@@ -435,6 +505,7 @@ cmd_help() {
   fi
   case "$1" in
   open) open_usage ;;
+  exec) exec_usage ;;
   ls) ls_usage ;;
   rm) rm_usage ;;
   here) here_usage ;;
@@ -460,6 +531,10 @@ help)
 open)
   shift
   cmd_open "$@"
+  ;;
+exec)
+  shift
+  cmd_exec "$@"
   ;;
 ls)
   shift
