@@ -1,11 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION="0.1.0"
-
 usage() {
   cat <<'USAGE'
-wt
+wt - A simple git worktree sugar
 
 Usage:
   wt <command>
@@ -17,7 +15,6 @@ Commands:
   here            print current workspace branch
   base            print base dir
   help [command]  show help
-  version         print version
 USAGE
 }
 
@@ -95,8 +92,8 @@ main_worktree_path() {
 abs_path() {
   local path="$1"
   case "$path" in
-    /*) printf '%s\n' "$path" ;;
-    *) printf '%s/%s\n' "$(pwd -P)" "$path" ;;
+  /*) printf '%s\n' "$path" ;;
+  *) printf '%s/%s\n' "$(pwd -P)" "$path" ;;
   esac
 }
 
@@ -113,8 +110,8 @@ base_dir() {
     return
   fi
   case "$chosen" in
-    /*) abs_path "$chosen" ;;
-    *) abs_path "$root/$chosen" ;;
+  /*) abs_path "$chosen" ;;
+  *) abs_path "$root/$chosen" ;;
   esac
 }
 
@@ -122,8 +119,8 @@ resolve_path() {
   local root="$1"
   local path="$2"
   case "$path" in
-    /*) abs_path "$path" ;;
-    *) abs_path "$root/$path" ;;
+  /*) abs_path "$path" ;;
+  *) abs_path "$root/$path" ;;
   esac
 }
 
@@ -144,10 +141,10 @@ worktree_entries() {
     key=${line%% *}
     value=${line#* }
     case "$key" in
-      worktree) path="$value" ;;
-      HEAD) head="$value" ;;
-      branch) branch="${value#refs/heads/}" ;;
-      detached) branch="" ;;
+    worktree) path="$value" ;;
+    HEAD) head="$value" ;;
+    branch) branch="${value#refs/heads/}" ;;
+    detached) branch="" ;;
     esac
   done < <(git -C "$root" worktree list --porcelain)
   if [ -n "$path" ]; then
@@ -196,16 +193,31 @@ cmd_open() {
   local from="" base_override="" path_override="" fetch=0 branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      -h|--help) open_usage; exit 0 ;;
-      --from) [ -n "${2:-}" ] || die "missing value for --from"; from="$2"; shift ;;
-      --from=*) from="${1#--from=}" ;;
-      --base) [ -n "${2:-}" ] || die "missing value for --base"; base_override="$2"; shift ;;
-      --base=*) base_override="${1#--base=}" ;;
-      --path) [ -n "${2:-}" ] || die "missing value for --path"; path_override="$2"; shift ;;
-      --path=*) path_override="${1#--path=}" ;;
-      --fetch) fetch=1 ;;
-      --*) die "unknown flag '$1'" ;;
-      *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
+    -h | --help)
+      open_usage
+      exit 0
+      ;;
+    --from)
+      [ -n "${2:-}" ] || die "missing value for --from"
+      from="$2"
+      shift
+      ;;
+    --from=*) from="${1#--from=}" ;;
+    --base)
+      [ -n "${2:-}" ] || die "missing value for --base"
+      base_override="$2"
+      shift
+      ;;
+    --base=*) base_override="${1#--base=}" ;;
+    --path)
+      [ -n "${2:-}" ] || die "missing value for --path"
+      path_override="$2"
+      shift
+      ;;
+    --path=*) path_override="${1#--path=}" ;;
+    --fetch) fetch=1 ;;
+    --*) die "unknown flag '$1'" ;;
+    *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
     esac
     shift
   done
@@ -252,13 +264,20 @@ cmd_ls() {
   local base_override="" plain=0 json=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      -h|--help) ls_usage; exit 0 ;;
-      --base) [ -n "${2:-}" ] || die "missing value for --base"; base_override="$2"; shift ;;
-      --base=*) base_override="${1#--base=}" ;;
-      --plain) plain=1 ;;
-      --json) json=1 ;;
-      --*) die "unknown flag '$1'" ;;
-      *) die "unexpected argument '$1'" ;;
+    -h | --help)
+      ls_usage
+      exit 0
+      ;;
+    --base)
+      [ -n "${2:-}" ] || die "missing value for --base"
+      base_override="$2"
+      shift
+      ;;
+    --base=*) base_override="${1#--base=}" ;;
+    --plain) plain=1 ;;
+    --json) json=1 ;;
+    --*) die "unknown flag '$1'" ;;
+    *) die "unexpected argument '$1'" ;;
     esac
     shift
   done
@@ -288,31 +307,31 @@ cmd_ls() {
     branch=${head#*$'\t'}
     head=${head%%$'\t'*}
     case "$path" in
-      "$base"/*)
-        filtered+="$branch\t$path\t$head\n"
-        ;;
+    "$base"/*)
+      filtered+="$branch\t$path\t$head\n"
+      ;;
     esac
-  done <<< "$entries"
+  done <<<"$entries"
   case "$mode" in
-    json)
-      printf '['
-      local first=1
-      while IFS=$'\t' read -r branch path head; do
-        [ -n "$branch" ] || continue
-        if [ "$first" -eq 0 ]; then
-          printf ','
-        fi
-        first=0
-        printf '{"branch":"%s","path":"%s","head":"%s"}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")"
-      done <<< "$(printf '%b' "$filtered")"
-      printf ']\n'
-      ;;
-    plain)
-      printf '%b' "$filtered" | awk -F'\t' 'NF>=2 {print $1"\t"$2}'
-      ;;
-    table)
-      printf '%b' "$filtered" | awk -F'\t' 'NF>=3 {printf "%-30s %-60s %s\n", $1, $2, $3}'
-      ;;
+  json)
+    printf '['
+    local first=1
+    while IFS=$'\t' read -r branch path head; do
+      [ -n "$branch" ] || continue
+      if [ "$first" -eq 0 ]; then
+        printf ','
+      fi
+      first=0
+      printf '{"branch":"%s","path":"%s","head":"%s"}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")"
+    done <<<"$(printf '%b' "$filtered")"
+    printf ']\n'
+    ;;
+  plain)
+    printf '%b' "$filtered" | awk -F'\t' 'NF>=2 {print $1"\t"$2}'
+    ;;
+  table)
+    printf '%b' "$filtered" | awk -F'\t' 'NF>=3 {printf "%-30s %-60s %s\n", $1, $2, $3}'
+    ;;
   esac
 }
 
@@ -320,12 +339,19 @@ cmd_rm() {
   local force=0 base_override="" branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      -h|--help) rm_usage; exit 0 ;;
-      -f|--force) force=1 ;;
-      --base) [ -n "${2:-}" ] || die "missing value for --base"; base_override="$2"; shift ;;
-      --base=*) base_override="${1#--base=}" ;;
-      --*) die "unknown flag '$1'" ;;
-      *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
+    -h | --help)
+      rm_usage
+      exit 0
+      ;;
+    -f | --force) force=1 ;;
+    --base)
+      [ -n "${2:-}" ] || die "missing value for --base"
+      base_override="$2"
+      shift
+      ;;
+    --base=*) base_override="${1#--base=}" ;;
+    --*) die "unknown flag '$1'" ;;
+    *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
     esac
     shift
   done
@@ -338,8 +364,8 @@ cmd_rm() {
     die "workspace not found: '$branch'"
   fi
   case "$path" in
-    "$base"/*) ;;
-    *) die "workspace not under base: '$path'" ;;
+  "$base"/*) ;;
+  *) die "workspace not under base: '$path'" ;;
   esac
   local dirty
   dirty=$(git -C "$path" status --porcelain)
@@ -348,8 +374,8 @@ cmd_rm() {
       printf "workspace '%s' has uncommitted changes. remove anyway? [y/N] " "$branch" >&2
       read -r answer
       case "$answer" in
-        y|Y|yes|YES) force=1 ;;
-        *) exit 1 ;;
+      y | Y | yes | YES) force=1 ;;
+      *) exit 1 ;;
       esac
     else
       die "workspace dirty: '$branch'"
@@ -375,8 +401,8 @@ cmd_here() {
   base=$(base_dir "$root" "")
   current=$(git rev-parse --show-toplevel)
   case "$current" in
-    "$base"/*) ;;
-    *) exit 1 ;;
+  "$base"/*) ;;
+  *) exit 1 ;;
   esac
   local entry
   while IFS= read -r entry; do
@@ -408,26 +434,48 @@ cmd_help() {
     exit 0
   fi
   case "$1" in
-    open) open_usage ;;
-    ls) ls_usage ;;
-    rm) rm_usage ;;
-    here) here_usage ;;
-    base) base_usage ;;
-    help) usage ;;
-    version) printf '%s\n' "$VERSION" ;;
-    *) die "unknown command '$1'" ;;
+  open) open_usage ;;
+  ls) ls_usage ;;
+  rm) rm_usage ;;
+  here) here_usage ;;
+  base) base_usage ;;
+  help) usage ;;
+  *) die "unknown command '$1'" ;;
   esac
 }
 
 case "${1:-}" in
-  "") usage; exit 1 ;;
-  -h|--help) usage; exit 0 ;;
-  version|--version) printf '%s\n' "$VERSION" ;;
-  help) shift; cmd_help "$@" ;;
-  open) shift; cmd_open "$@" ;;
-  ls) shift; cmd_ls "$@" ;;
-  rm) shift; cmd_rm "$@" ;;
-  here) shift; cmd_here "$@" ;;
-  base) shift; cmd_base "$@" ;;
-  *) die "unknown command '$1'" ;;
+"")
+  usage
+  exit 1
+  ;;
+-h | --help)
+  usage
+  exit 0
+  ;;
+help)
+  shift
+  cmd_help "$@"
+  ;;
+open)
+  shift
+  cmd_open "$@"
+  ;;
+ls)
+  shift
+  cmd_ls "$@"
+  ;;
+rm)
+  shift
+  cmd_rm "$@"
+  ;;
+here)
+  shift
+  cmd_here "$@"
+  ;;
+base)
+  shift
+  cmd_base "$@"
+  ;;
+*) die "unknown command '$1'" ;;
 esac

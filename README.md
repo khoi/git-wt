@@ -19,7 +19,6 @@ wt rm <branch> [--force] [--base <dir>]
 wt here
 wt base
 wt help [command]
-wt version
 ```
 
 ## Model
