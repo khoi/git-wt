@@ -19,6 +19,12 @@ Open or create a workspace:
 wt open feat-1 --from main
 ```
 
+Return to main worktree:
+
+```
+cd "$(wt root)"
+```
+
 Run Codex directly in a workspace:
 
 ```

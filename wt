@@ -15,6 +15,7 @@ Commands:
   rm <branch>     remove a workspace
   here            print current workspace branch
   base            print base dir
+  root            print main worktree path
   completion      print shell completion
   help [command]  show help
 USAGE
@@ -78,6 +79,12 @@ USAGE
 base_usage() {
   cat <<'USAGE'
 wt base
+USAGE
+}
+
+root_usage() {
+  cat <<'USAGE'
+wt root
 USAGE
 }
 
@@ -513,9 +520,14 @@ cmd_base() {
   printf '%s\n' "$base"
 }
 
+cmd_root() {
+  require_repo
+  main_worktree_path
+}
+
 completion_bash() {
   local commands
-  commands="open exec ls rm here base help completion"
+  commands="open exec ls rm here base root help completion"
   cat <<EOF
 command -v wt >/dev/null 2>&1 || return 0
 
@@ -575,12 +587,12 @@ _wt_complete() {
       esac
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
-    here|base)
+    here|base|root)
       flags="-h --help"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     help)
-      flags="open exec ls rm here base help completion"
+      flags="open exec ls rm here base root help completion"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     completion)
@@ -605,7 +617,7 @@ __wt_branches() {
 
 _wt() {
   local -a subcmds subdescs open_flags open_descs exec_flags exec_descs ls_flags ls_descs rm_flags rm_descs hb_flags hb_descs
-  subcmds=(open exec ls rm here base help completion)
+  subcmds=(open exec ls rm here base root help completion)
   subdescs=(
     "create or open a workspace"
     "open a workspace and run a command"
@@ -613,6 +625,7 @@ _wt() {
     "remove a workspace"
     "print current workspace branch"
     "print base dir"
+    "print main worktree path"
     "show help"
     "print shell completion"
   )
@@ -666,7 +679,7 @@ _wt() {
       compadd -d ls_descs -- \$ls_flags
       return 0
       ;;
-    here|base)
+    here|base|root)
       compadd -d hb_descs -- \$hb_flags
       return 0
       ;;
@@ -703,6 +716,7 @@ complete -c wt -n '__fish_use_subcommand' -a ls -d 'list workspaces'
 complete -c wt -n '__fish_use_subcommand' -a rm -d 'remove a workspace'
 complete -c wt -n '__fish_use_subcommand' -a here -d 'print current workspace branch'
 complete -c wt -n '__fish_use_subcommand' -a base -d 'print base dir'
+complete -c wt -n '__fish_use_subcommand' -a root -d 'print main worktree path'
 complete -c wt -n '__fish_use_subcommand' -a help -d 'show help'
 complete -c wt -n '__fish_use_subcommand' -a completion -d 'print shell completion'
 complete -c wt -n '__fish_seen_subcommand_from open exec rm' -a '(__wt_branches)'
@@ -728,6 +742,7 @@ complete -c wt -n '__fish_seen_subcommand_from help' -a ls -d 'list workspaces'
 complete -c wt -n '__fish_seen_subcommand_from help' -a rm -d 'remove a workspace'
 complete -c wt -n '__fish_seen_subcommand_from help' -a here -d 'print current workspace branch'
 complete -c wt -n '__fish_seen_subcommand_from help' -a base -d 'print base dir'
+complete -c wt -n '__fish_seen_subcommand_from help' -a root -d 'print main worktree path'
 complete -c wt -n '__fish_seen_subcommand_from help' -a help -d 'show help'
 complete -c wt -n '__fish_seen_subcommand_from help' -a completion -d 'print shell completion'
 complete -c wt -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
@@ -759,6 +774,7 @@ cmd_help() {
   rm) rm_usage ;;
   here) here_usage ;;
   base) base_usage ;;
+  root) root_usage ;;
   completion) completion_usage ;;
   help) usage ;;
   *) die "unknown command '$1'" ;;
@@ -801,6 +817,10 @@ here)
 base)
   shift
   cmd_base "$@"
+  ;;
+root)
+  shift
+  cmd_root "$@"
   ;;
 completion)
   shift
