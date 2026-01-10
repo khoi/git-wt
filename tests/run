@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+export ROOT
+export WT_BIN="$ROOT/wt"
+
+status=0
+for t in "$ROOT"/tests/cases/*.t; do
+  printf '%s\n' "run $t" >&2
+  bash "$t" || status=$?
+done
+exit "$status"

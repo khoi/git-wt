@@ -1,43 +1,64 @@
-# git-wt
+# wt
 
-Just some dead simple sugar on top of git worktree with fzf.
+Minimal git worktree helper with the main use case for running multiple coding agents in parallel.
 
 ## Installation
 
-Just copy it to ur PATH
-
-## Flow
-
-An actual workflow will be something like this:
-
-```
-git wt switch -c fancy-new-feature
-# do ur changes
-# create a PR, or merge the branch from main
-git wt purge # ⚠️ this destroy the wt and the branch. 
-```
+Copy `wt` to your PATH.
 
 ## Usage
 
 ```
-git wt switch -c <feature>  create worktree and cd into it
-git wt switch <feature>     cd into existing worktree
-git wt switch               pick worktree via fzf
-git wt --base <dir> switch -c <feature>  set base dir for this run
-GIT_WT_BASE=<dir> git wt switch <feature>  set base dir via env
-git wt purge                delete current worktree and branch, cd to main
-git wt list                 list worktrees
-git wt ls                   alias for list
+wt open <branch> [--from <ref>] [--base <dir>] [--path <dir>] [--fetch]
+wt ls [--base <dir>] [--plain] [--json]
+wt rm <branch> [--force] [--base <dir>]
+wt here
+wt base
+wt help [command]
+wt version
 ```
+
+## Model
+
+- A workspace is a git worktree + a git branch.
+- The workspace identifier is the branch name.
+- Default worktree path is `<base>/<branch>`.
 
 ## Base dir
 
-Default base dir is `../{gitroot}-worktrees`. Override with `--base <dir>` or `GIT_WT_BASE`. The flag wins.
+Default: `<gitroot>/.wt`
 
-Examples:
+Override with `--base <dir>` or `GIT_WT_BASE` (flag wins).
+
+## Output
+
+- If stdout is a TTY, `wt ls` prints a human table.
+- If stdout is not a TTY, `wt ls` prints `branch<TAB>path`.
+- `--plain` forces tab-delimited output.
+- `--json` returns JSON.
+
+## Examples
+
+Create five workspaces:
 
 ```
-git wt --base /tmp/wt switch -c feature
-git wt --base .worktrees switch feature
-GIT_WT_BASE=/tmp/wt git wt switch feature
+echo "feature-a feature-b feature-c" | xargs -n1 wt open --from main
+```
+
+Open or create a workspace:
+
+```
+wt open feat-1 --from main
+```
+
+Remove a workspace:
+
+```
+wt rm feat-1
+```
+
+## Unit Tests
+
+```
+./tests/run
 ```

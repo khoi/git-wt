@@ -1,0 +1,433 @@
+#!/bin/bash
+set -euo pipefail
+
+VERSION="0.1.0"
+
+usage() {
+  cat <<'USAGE'
+wt
+
+Usage:
+  wt <command>
+
+Commands:
+  open <branch>   create or open a workspace
+  ls              list workspaces
+  rm <branch>     remove a workspace
+  here            print current workspace branch
+  base            print base dir
+  help [command]  show help
+  version         print version
+USAGE
+}
+
+open_usage() {
+  cat <<'USAGE'
+wt open <branch>
+
+Flags:
+  --from <ref>    base ref for new branch
+  --base <dir>    base dir override
+  --path <dir>    explicit worktree path
+  --fetch         fetch remotes before resolving --from
+  -h, --help      show help
+USAGE
+}
+
+ls_usage() {
+  cat <<'USAGE'
+wt ls
+
+Flags:
+  --base <dir>    base dir override
+  --plain         tab-delimited output
+  --json          JSON output
+  -h, --help      show help
+USAGE
+}
+
+rm_usage() {
+  cat <<'USAGE'
+wt rm <branch>
+
+Flags:
+  -f, --force     remove even if dirty
+  --base <dir>    base dir override
+  -h, --help      show help
+USAGE
+}
+
+here_usage() {
+  cat <<'USAGE'
+wt here
+USAGE
+}
+
+base_usage() {
+  cat <<'USAGE'
+wt base
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$1" >&2
+  exit 1
+}
+
+require_repo() {
+  git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
+}
+
+main_worktree_path() {
+  local git_dir
+  git_dir=$(git rev-parse --git-dir)
+  if [[ "$git_dir" == *"/worktrees/"* ]]; then
+    while read -r key value; do
+      if [ "$key" = "worktree" ]; then
+        printf '%s\n' "$value"
+        return
+      fi
+    done < <(git worktree list --porcelain)
+  fi
+  git rev-parse --show-toplevel
+}
+
+abs_path() {
+  local path="$1"
+  case "$path" in
+    /*) printf '%s\n' "$path" ;;
+    *) printf '%s/%s\n' "$(pwd -P)" "$path" ;;
+  esac
+}
+
+base_dir() {
+  local root="$1"
+  local override="$2"
+  local chosen
+  chosen="${GIT_WT_BASE:-}"
+  if [ -n "$override" ]; then
+    chosen="$override"
+  fi
+  if [ -z "$chosen" ]; then
+    abs_path "$root/.wt"
+    return
+  fi
+  case "$chosen" in
+    /*) abs_path "$chosen" ;;
+    *) abs_path "$root/$chosen" ;;
+  esac
+}
+
+resolve_path() {
+  local root="$1"
+  local path="$2"
+  case "$path" in
+    /*) abs_path "$path" ;;
+    *) abs_path "$root/$path" ;;
+  esac
+}
+
+worktree_entries() {
+  local root="$1"
+  local path="" head="" branch=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ -z "$line" ]; then
+      if [ -n "$path" ]; then
+        printf '%s\t%s\t%s\n' "$path" "$head" "$branch"
+      fi
+      path=""
+      head=""
+      branch=""
+      continue
+    fi
+    local key value
+    key=${line%% *}
+    value=${line#* }
+    case "$key" in
+      worktree) path="$value" ;;
+      HEAD) head="$value" ;;
+      branch) branch="${value#refs/heads/}" ;;
+      detached) branch="" ;;
+    esac
+  done < <(git -C "$root" worktree list --porcelain)
+  if [ -n "$path" ]; then
+    printf '%s\t%s\t%s\n' "$path" "$head" "$branch"
+  fi
+}
+
+find_worktree_by_branch() {
+  local root="$1"
+  local branch="$2"
+  local entry
+  while IFS= read -r entry; do
+    local path head name
+    path=${entry%%$'\t'*}
+    head=${entry#*$'\t'}
+    name=${head#*$'\t'}
+    head=${head%%$'\t'*}
+    if [ "$name" = "$branch" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done < <(worktree_entries "$root")
+  return 1
+}
+
+find_worktree_by_path() {
+  local root="$1"
+  local target="$2"
+  local entry
+  while IFS= read -r entry; do
+    local path
+    path=${entry%%$'\t'*}
+    if [ "$path" = "$target" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done < <(worktree_entries "$root")
+  return 1
+}
+
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+cmd_open() {
+  local from="" base_override="" path_override="" fetch=0 branch=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help) open_usage; exit 0 ;;
+      --from) [ -n "${2:-}" ] || die "missing value for --from"; from="$2"; shift ;;
+      --from=*) from="${1#--from=}" ;;
+      --base) [ -n "${2:-}" ] || die "missing value for --base"; base_override="$2"; shift ;;
+      --base=*) base_override="${1#--base=}" ;;
+      --path) [ -n "${2:-}" ] || die "missing value for --path"; path_override="$2"; shift ;;
+      --path=*) path_override="${1#--path=}" ;;
+      --fetch) fetch=1 ;;
+      --*) die "unknown flag '$1'" ;;
+      *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
+    esac
+    shift
+  done
+  [ -n "$branch" ] || die "missing branch"
+  require_repo
+  local root base path
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "$base_override")
+  if [ -n "$path_override" ]; then
+    path=$(resolve_path "$root" "$path_override")
+  else
+    path=$(resolve_path "$root" "$base/$branch")
+  fi
+  local existing
+  if existing=$(find_worktree_by_branch "$root" "$branch"); then
+    printf '%s\n' "$existing"
+    exit 0
+  fi
+  if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
+    if [ -z "$path_override" ]; then
+      die "branch exists without worktree: '$branch'"
+    fi
+    if find_worktree_by_path "$root" "$path" >/dev/null; then
+      die "worktree path already in use: '$path'"
+    fi
+    mkdir -p "$(dirname "$path")"
+    git -C "$root" worktree add "$path" "$branch" >/dev/null 2>&1
+    printf '%s\n' "$path"
+    exit 0
+  fi
+  if [ "$fetch" -eq 1 ]; then
+    git -C "$root" fetch >/dev/null 2>&1
+  fi
+  if [ -z "$from" ]; then
+    from=$(git -C "$root" rev-parse HEAD)
+  fi
+  git -C "$root" rev-parse --verify "${from}^{commit}" >/dev/null 2>&1 || die "invalid --from ref '$from'"
+  mkdir -p "$(dirname "$path")"
+  git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null 2>&1
+  printf '%s\n' "$path"
+}
+
+cmd_ls() {
+  local base_override="" plain=0 json=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help) ls_usage; exit 0 ;;
+      --base) [ -n "${2:-}" ] || die "missing value for --base"; base_override="$2"; shift ;;
+      --base=*) base_override="${1#--base=}" ;;
+      --plain) plain=1 ;;
+      --json) json=1 ;;
+      --*) die "unknown flag '$1'" ;;
+      *) die "unexpected argument '$1'" ;;
+    esac
+    shift
+  done
+  require_repo
+  local root base
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "$base_override")
+  if [ "$plain" -eq 1 ] && [ "$json" -eq 1 ]; then
+    die "cannot use --plain and --json together"
+  fi
+  local mode="table"
+  if [ "$plain" -eq 1 ]; then
+    mode="plain"
+  elif [ "$json" -eq 1 ]; then
+    mode="json"
+  elif [ ! -t 1 ]; then
+    mode="plain"
+  fi
+  local entries
+  entries=$(worktree_entries "$root")
+  local filtered=""
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    local path head branch
+    path=${entry%%$'\t'*}
+    head=${entry#*$'\t'}
+    branch=${head#*$'\t'}
+    head=${head%%$'\t'*}
+    case "$path" in
+      "$base"/*)
+        filtered+="$branch\t$path\t$head\n"
+        ;;
+    esac
+  done <<< "$entries"
+  case "$mode" in
+    json)
+      printf '['
+      local first=1
+      while IFS=$'\t' read -r branch path head; do
+        [ -n "$branch" ] || continue
+        if [ "$first" -eq 0 ]; then
+          printf ','
+        fi
+        first=0
+        printf '{"branch":"%s","path":"%s","head":"%s"}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")"
+      done <<< "$(printf '%b' "$filtered")"
+      printf ']\n'
+      ;;
+    plain)
+      printf '%b' "$filtered" | awk -F'\t' 'NF>=2 {print $1"\t"$2}'
+      ;;
+    table)
+      printf '%b' "$filtered" | awk -F'\t' 'NF>=3 {printf "%-30s %-60s %s\n", $1, $2, $3}'
+      ;;
+  esac
+}
+
+cmd_rm() {
+  local force=0 base_override="" branch=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help) rm_usage; exit 0 ;;
+      -f|--force) force=1 ;;
+      --base) [ -n "${2:-}" ] || die "missing value for --base"; base_override="$2"; shift ;;
+      --base=*) base_override="${1#--base=}" ;;
+      --*) die "unknown flag '$1'" ;;
+      *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
+    esac
+    shift
+  done
+  [ -n "$branch" ] || die "missing branch"
+  require_repo
+  local root base path
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "$base_override")
+  if ! path=$(find_worktree_by_branch "$root" "$branch"); then
+    die "workspace not found: '$branch'"
+  fi
+  case "$path" in
+    "$base"/*) ;;
+    *) die "workspace not under base: '$path'" ;;
+  esac
+  local dirty
+  dirty=$(git -C "$path" status --porcelain)
+  if [ -n "$dirty" ] && [ "$force" -eq 0 ]; then
+    if [ -t 0 ]; then
+      printf "workspace '%s' has uncommitted changes. remove anyway? [y/N] " "$branch" >&2
+      read -r answer
+      case "$answer" in
+        y|Y|yes|YES) force=1 ;;
+        *) exit 1 ;;
+      esac
+    else
+      die "workspace dirty: '$branch'"
+    fi
+  fi
+  if [ "$force" -eq 1 ]; then
+    git -C "$root" worktree remove --force "$path" >/dev/null 2>&1
+  else
+    git -C "$root" worktree remove "$path" >/dev/null 2>&1
+  fi
+  if [ "$force" -eq 1 ]; then
+    git -C "$root" branch -D "$branch" >/dev/null 2>&1
+  else
+    git -C "$root" branch -d "$branch" >/dev/null 2>&1
+  fi
+  printf '%s\n' "$path"
+}
+
+cmd_here() {
+  require_repo
+  local root base current
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "")
+  current=$(git rev-parse --show-toplevel)
+  case "$current" in
+    "$base"/*) ;;
+    *) exit 1 ;;
+  esac
+  local entry
+  while IFS= read -r entry; do
+    local path head name
+    path=${entry%%$'\t'*}
+    head=${entry#*$'\t'}
+    name=${head#*$'\t'}
+    if [ "$path" = "$current" ]; then
+      if [ -n "$name" ]; then
+        printf '%s\n' "$name"
+        exit 0
+      fi
+    fi
+  done < <(worktree_entries "$root")
+  exit 1
+}
+
+cmd_base() {
+  require_repo
+  local root base
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "")
+  printf '%s\n' "$base"
+}
+
+cmd_help() {
+  if [ "$#" -eq 0 ]; then
+    usage
+    exit 0
+  fi
+  case "$1" in
+    open) open_usage ;;
+    ls) ls_usage ;;
+    rm) rm_usage ;;
+    here) here_usage ;;
+    base) base_usage ;;
+    help) usage ;;
+    version) printf '%s\n' "$VERSION" ;;
+    *) die "unknown command '$1'" ;;
+  esac
+}
+
+case "${1:-}" in
+  "") usage; exit 1 ;;
+  -h|--help) usage; exit 0 ;;
+  version|--version) printf '%s\n' "$VERSION" ;;
+  help) shift; cmd_help "$@" ;;
+  open) shift; cmd_open "$@" ;;
+  ls) shift; cmd_ls "$@" ;;
+  rm) shift; cmd_rm "$@" ;;
+  here) shift; cmd_here "$@" ;;
+  base) shift; cmd_base "$@" ;;
+  *) die "unknown command '$1'" ;;
+esac
