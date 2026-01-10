@@ -4,7 +4,11 @@ Minimal git worktree helper with the main use case for running multiple coding a
 
 ## Installation
 
-Copy `wt` to your PATH.
+Run:
+
+```
+curl -fsSL https://raw.githubusercontent.com/khoi/git-wt/main/install.sh | sh
+```
 
 ## Usage
 
