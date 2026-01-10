@@ -45,4 +45,48 @@ else
   mv "$tmp" "$dest/wt"
 fi
 chmod +x "$dest/wt"
+
+install_completion() {
+  shell="$1"
+  target="$2"
+  user_dir="$3"
+  dir=""
+  shift 3
+  for d in "$@"; do
+    if [ -d "$d" ] && [ -w "$d" ]; then
+      dir="$d"
+      break
+    fi
+  done
+  if [ -z "$dir" ]; then
+    dir="$user_dir"
+    mkdir -p "$dir"
+  fi
+  "$dest/wt" completion "$shell" > "$dir/$target"
+  printf '%s\n' "wt: completion $shell $dir/$target"
+}
+
+bash_user="${XDG_DATA_HOME:-"$HOME/.local/share"}/bash-completion/completions"
+zsh_user="${XDG_DATA_HOME:-"$HOME/.local/share"}/zsh/site-functions"
+fish_user="${XDG_CONFIG_HOME:-"$HOME/.config"}/fish/completions"
+mkdir -p "$fish_user"
+
+install_completion bash wt "$bash_user" \
+  /usr/local/share/bash-completion/completions \
+  /opt/homebrew/share/bash-completion/completions \
+  /usr/share/bash-completion/completions \
+  "$bash_user"
+
+install_completion zsh _wt "$zsh_user" \
+  /usr/local/share/zsh/site-functions \
+  /opt/homebrew/share/zsh/site-functions \
+  /usr/share/zsh/site-functions \
+  "$zsh_user"
+
+install_completion fish wt.fish "$fish_user" \
+  "$fish_user" \
+  /usr/local/share/fish/vendor_completions.d \
+  /opt/homebrew/share/fish/vendor_completions.d \
+  /usr/share/fish/vendor_completions.d
+
 printf 'installed %s\n' "$dest/wt"
