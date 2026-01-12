@@ -139,10 +139,12 @@ base_dir() {
     chosen="$override"
   fi
   if [ -z "$chosen" ]; then
-    local name parent
-    name=$(basename "$root")
-    parent=$(dirname "$root")
-    abs_path "$parent/${name}_worktrees"
+    local git_dir
+    git_dir=$(git -C "$root" rev-parse --git-dir)
+    case "$git_dir" in
+    /*) abs_path "$git_dir/worktrees" ;;
+    *) abs_path "$root/$git_dir/worktrees" ;;
+    esac
     return
   fi
   case "$chosen" in
