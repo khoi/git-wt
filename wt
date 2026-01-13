@@ -533,6 +533,25 @@ completion_bash() {
   cat <<EOF
 command -v wt >/dev/null 2>&1 || return 0
 
+wt() {
+  case "\$1" in
+    switch)
+      local path
+      path=\$(command wt "\$@")
+      local rc=\$?
+      if [[ \$rc -eq 0 && -d "\$path" ]]; then
+        cd "\$path"
+      else
+        [[ -n "\$path" ]] && echo "\$path"
+        return \$rc
+      fi
+      ;;
+    *)
+      command wt "\$@"
+      ;;
+  esac
+}
+
 __wt_branches() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
   git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
@@ -611,6 +630,25 @@ EOF
 completion_zsh() {
   cat <<EOF
 command -v wt >/dev/null 2>&1 || return 0
+
+wt() {
+  case "\$1" in
+    switch)
+      local path
+      path=\$(command wt "\$@")
+      local rc=\$?
+      if [[ \$rc -eq 0 && -d "\$path" ]]; then
+        cd "\$path"
+      else
+        [[ -n "\$path" ]] && echo "\$path"
+        return \$rc
+      fi
+      ;;
+    *)
+      command wt "\$@"
+      ;;
+  esac
+}
 
 __wt_branches() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
@@ -704,6 +742,21 @@ EOF
 completion_fish() {
   cat <<'EOF'
 type -q wt; or return
+
+function wt
+  if test "$argv[1]" = "switch"
+    set -l path (command wt $argv)
+    set -l rc $status
+    if test $rc -eq 0 -a -d "$path"
+      cd "$path"
+    else
+      test -n "$path"; and echo "$path"
+      return $rc
+    end
+  else
+    command wt $argv
+  end
+end
 
 function __wt_branches
   command git rev-parse --git-dir >/dev/null 2>&1

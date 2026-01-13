@@ -10,6 +10,20 @@ Run:
 curl -fsSL https://raw.githubusercontent.com/khoi/git-wt/main/install.sh | sh
 ```
 
+## Shell Integration
+
+Add to shell config for auto-cd on `wt switch`:
+
+```bash
+# bash (~/.bashrc)
+eval "$(wt completion bash)"
+
+# zsh (~/.zshrc)
+eval "$(wt completion zsh)"
+
+# fish (~/.config/fish/config.fish)
+wt completion fish | source
+```
 
 ## Common Usages
 
