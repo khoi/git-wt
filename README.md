@@ -60,7 +60,7 @@ wt <subcommand> --help
 
 ## Base dir
 
-By default the worktrees are stored at `<gitroot>/.git/worktrees`
+By default worktrees are stored at `<gitroot>/.worktrees`
 
 Override with `--base <dir>` or `GIT_WT_BASE` (flag wins).
 
