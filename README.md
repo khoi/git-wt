@@ -30,7 +30,14 @@ wt completion fish | source
 Open or create a workspace:
 
 ```
-wt switch feat-1 --from main
+wt switch feat-1 --from main 
+
+# and if copying dirty files also
+
+wt switch feat-2 --from main \
+  --copyignored 
+  --copyuntracked \
+  --copymodified
 ```
 
 Return to main worktree:
