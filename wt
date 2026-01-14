@@ -587,6 +587,15 @@ command -v wt >/dev/null 2>&1 || return 0
 wt() {
   case "\$1" in
     switch)
+      local i
+      for i in "\$@"; do
+        case "\$i" in
+          -h|--help)
+            command wt "\$@"
+            return \$?
+            ;;
+        esac
+      done
       local path
       path=\$(command wt "\$@")
       local rc=\$?
@@ -628,7 +637,7 @@ _wt_complete() {
   fi
   case "\$cmd" in
     switch)
-      flags="--from --base --path --fetch -h --help"
+      flags="--from --base --path --fetch --copyignored --copyuntracked --copymodified -h --help"
       case "\$prev" in
         --from|--base|--path) return 0 ;;
       esac
@@ -685,6 +694,15 @@ command -v wt >/dev/null 2>&1 || return 0
 wt() {
   case "\$1" in
     switch)
+      local i
+      for i in "\$@"; do
+        case "\$i" in
+          -h|--help)
+            command wt "\$@"
+            return \$?
+            ;;
+        esac
+      done
       local path
       path=\$(command wt "\$@")
       local rc=\$?
@@ -720,8 +738,8 @@ _wt() {
     "show help"
     "print shell completion"
   )
-  switch_flags=(--from --base --path --fetch -h --help)
-  switch_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help")
+  switch_flags=(--from --base --path --fetch --copyignored --copyuntracked --copymodified -h --help)
+  switch_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
   exec_flags=(--from --base --path --fetch -h --help --)
   exec_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
   ls_flags=(--base --plain --json -h --help)
@@ -796,6 +814,10 @@ type -q wt; or return
 
 function wt
   if test "$argv[1]" = "switch"
+    if contains -- -h --help $argv
+      command wt $argv
+      return $status
+    end
     set -l path (command wt $argv)
     set -l rc $status
     if test $rc -eq 0 -a -d "$path"
@@ -832,6 +854,9 @@ complete -c wt -n '__fish_seen_subcommand_from switch exec' -l base -r -d 'base 
 complete -c wt -n '__fish_seen_subcommand_from switch exec' -l path -r -d 'explicit worktree path'
 complete -c wt -n '__fish_seen_subcommand_from switch exec' -l fetch -d 'fetch remotes before resolving --from'
 complete -c wt -n '__fish_seen_subcommand_from switch exec' -s h -l help -d 'show help'
+complete -c wt -n '__fish_seen_subcommand_from switch' -l copyignored -d 'copy gitignored files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch' -l copyuntracked -d 'copy untracked files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch' -l copymodified -d 'copy modified files to new worktree'
 
 complete -c wt -n '__fish_seen_subcommand_from ls' -l base -r -d 'base dir override'
 complete -c wt -n '__fish_seen_subcommand_from ls' -l plain -d 'tab-delimited output'
