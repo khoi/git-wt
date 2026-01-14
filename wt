@@ -26,11 +26,14 @@ switch_usage() {
 wt switch <branch>
 
 Flags:
-  --from <ref>    base ref for new branch
-  --base <dir>    base dir override
-  --path <dir>    explicit worktree path
-  --fetch         fetch remotes before resolving --from
-  -h, --help      show help
+  --from <ref>      base ref for new branch
+  --base <dir>      base dir override
+  --path <dir>      explicit worktree path
+  --fetch           fetch remotes before resolving --from
+  --copyignored     copy gitignored files to new worktree
+  --copyuntracked   copy untracked files to new worktree
+  --copymodified    copy modified files to new worktree
+  -h, --help        show help
 USAGE
 }
 
@@ -222,12 +225,59 @@ json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
+list_ignored_files() {
+  local root="$1"
+  git -C "$root" ls-files --others --ignored --exclude-standard 2>/dev/null | grep -v '^\.git/'
+}
+
+list_untracked_files() {
+  local root="$1"
+  git -C "$root" ls-files --others --exclude-standard 2>/dev/null | grep -v '^\.git/'
+}
+
+list_modified_files() {
+  local root="$1"
+  git -C "$root" ls-files --modified 2>/dev/null | grep -v '^\.git/'
+}
+
+copy_files_to_worktree() {
+  local src="$1"
+  local dst="$2"
+  local copyignored="$3"
+  local copyuntracked="$4"
+  local copymodified="$5"
+  local files=""
+  if [ "$copyignored" -eq 1 ]; then
+    files+=$(list_ignored_files "$src")$'\n'
+  fi
+  if [ "$copyuntracked" -eq 1 ]; then
+    files+=$(list_untracked_files "$src")$'\n'
+  fi
+  if [ "$copymodified" -eq 1 ]; then
+    files+=$(list_modified_files "$src")$'\n'
+  fi
+  local seen=""
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    case "$seen" in *"$file"*) continue ;; esac
+    seen+="$file"$'\n'
+    local srcfile="$src/$file"
+    local dstfile="$dst/$file"
+    [ -f "$srcfile" ] || continue
+    mkdir -p "$(dirname "$dstfile")"
+    cp "$srcfile" "$dstfile" 2>/dev/null || true
+  done <<< "$files"
+}
+
 open_path() {
   local branch="$1"
   local from="$2"
   local base_override="$3"
   local path_override="$4"
   local fetch="$5"
+  local copyignored="${6:-0}"
+  local copyuntracked="${7:-0}"
+  local copymodified="${8:-0}"
   require_repo
   local root base path
   root=$(main_worktree_path)
@@ -251,6 +301,7 @@ open_path() {
     fi
     mkdir -p "$(dirname "$path")"
     git -C "$root" worktree add "$path" "$branch" >/dev/null 2>&1
+    copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified"
     printf '%s\n' "$path"
     return 0
   fi
@@ -263,11 +314,13 @@ open_path() {
   git -C "$root" rev-parse --verify "${from}^{commit}" >/dev/null 2>&1 || die "invalid --from ref '$from'"
   mkdir -p "$(dirname "$path")"
   git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null 2>&1
+  copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified"
   printf '%s\n' "$path"
 }
 
 cmd_switch() {
   local from="" base_override="" path_override="" fetch=0 branch=""
+  local copyignored=0 copyuntracked=0 copymodified=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
     -h | --help)
@@ -293,13 +346,16 @@ cmd_switch() {
       ;;
     --path=*) path_override="${1#--path=}" ;;
     --fetch) fetch=1 ;;
+    --copyignored) copyignored=1 ;;
+    --copyuntracked) copyuntracked=1 ;;
+    --copymodified) copymodified=1 ;;
     --*) die "unknown flag '$1'" ;;
     *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
     esac
     shift
   done
   [ -n "$branch" ] || die "missing branch"
-  open_path "$branch" "$from" "$base_override" "$path_override" "$fetch"
+  open_path "$branch" "$from" "$base_override" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified"
 }
 
 cmd_exec() {
