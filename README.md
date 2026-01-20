@@ -21,8 +21,8 @@ eval "$(wt completion bash)"
 # zsh (~/.zshrc)
 eval "$(wt completion zsh)"
 
-# fish (~/.config/fish/config.fish)
-wt completion fish | source
+# fish (~/.config/fish/conf.d/wt.fish)
+source ~/.config/fish/completions/wt.fish
 ```
 
 ## Common Usages

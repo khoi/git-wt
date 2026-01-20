@@ -69,7 +69,9 @@ install_completion() {
 bash_user="${XDG_DATA_HOME:-"$HOME/.local/share"}/bash-completion/completions"
 zsh_user="${XDG_DATA_HOME:-"$HOME/.local/share"}/zsh/site-functions"
 fish_user="${XDG_CONFIG_HOME:-"$HOME/.config"}/fish/completions"
+fish_conf_dir="${XDG_CONFIG_HOME:-"$HOME/.config"}/fish/conf.d"
 mkdir -p "$fish_user"
+mkdir -p "$fish_conf_dir"
 
 install_completion bash wt "$bash_user" \
   /usr/local/share/bash-completion/completions \
@@ -88,5 +90,8 @@ install_completion fish wt.fish "$fish_user" \
   /usr/local/share/fish/vendor_completions.d \
   /opt/homebrew/share/fish/vendor_completions.d \
   /usr/share/fish/vendor_completions.d
+
+printf '%s\n' "source $fish_user/wt.fish" > "$fish_conf_dir/wt.fish"
+printf '%s\n' "wt: fish conf $fish_conf_dir/wt.fish"
 
 printf 'installed %s\n' "$dest/wt"
