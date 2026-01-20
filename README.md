@@ -35,9 +35,7 @@ wt sw feat-1 --from main
 # and if copying dirty files also
 
 wt switch feat-2 --from main \
-  --copyignored 
-  --copyuntracked \
-  --copymodified
+  --copy-all
 ```
 
 Return to main worktree:

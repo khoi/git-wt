@@ -17,17 +17,22 @@ echo "untracked" > untracked.txt
 
 echo "modified" >> README.md
 
-path=$("$WT_BIN" switch feat-copy --from main --copyignored --copyuntracked --copymodified)
+path=$("$WT_BIN" switch feat-copy --from main --copy-ignored --copy-untracked --copy-modified)
 
-[ -f "$path/.env" ] || fail ".env not copied (copyignored)"
+[ -f "$path/.env" ] || fail ".env not copied (copy-ignored)"
 [ "$(cat "$path/.env")" = "secret" ] || fail ".env content mismatch"
 
-[ -f "$path/untracked.txt" ] || fail "untracked.txt not copied (copyuntracked)"
+[ -f "$path/untracked.txt" ] || fail "untracked.txt not copied (copy-untracked)"
 [ "$(cat "$path/untracked.txt")" = "untracked" ] || fail "untracked.txt content mismatch"
 
-[ -f "$path/README.md" ] || fail "README.md not copied (copymodified)"
+[ -f "$path/README.md" ] || fail "README.md not copied (copy-modified)"
 assert_match "modified" "$(cat "$path/README.md")"
 
 path2=$("$WT_BIN" switch feat-nocopy --from main)
 [ ! -f "$path2/.env" ] || fail ".env should not be copied without flag"
 [ ! -f "$path2/untracked.txt" ] || fail "untracked.txt should not be copied without flag"
+
+path3=$("$WT_BIN" switch feat-copy-all --from main --copy-all)
+[ -f "$path3/.env" ] || fail ".env not copied (copy-all)"
+[ -f "$path3/untracked.txt" ] || fail "untracked.txt not copied (copy-all)"
+[ -f "$path3/README.md" ] || fail "README.md not copied (copy-all)"

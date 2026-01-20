@@ -31,9 +31,10 @@ Flags:
   --base <dir>      base dir override
   --path <dir>      explicit worktree path
   --fetch           fetch remotes before resolving --from
-  --copyignored     copy gitignored files to new worktree
-  --copyuntracked   copy untracked files to new worktree
-  --copymodified    copy modified files to new worktree
+  --copy-all        copy ignored, untracked, and modified files to new worktree
+  --copy-ignored    copy gitignored files to new worktree
+  --copy-untracked  copy untracked files to new worktree
+  --copy-modified   copy modified files to new worktree
   -h, --help        show help
 USAGE
 }
@@ -347,9 +348,10 @@ cmd_switch() {
       ;;
     --path=*) path_override="${1#--path=}" ;;
     --fetch) fetch=1 ;;
-    --copyignored) copyignored=1 ;;
-    --copyuntracked) copyuntracked=1 ;;
-    --copymodified) copymodified=1 ;;
+    --copy-all) copyignored=1; copyuntracked=1; copymodified=1 ;;
+    --copy-ignored) copyignored=1 ;;
+    --copy-untracked) copyuntracked=1 ;;
+    --copy-modified) copymodified=1 ;;
     --*) die "unknown flag '$1'" ;;
     *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
     esac
@@ -638,7 +640,7 @@ _wt_complete() {
   fi
   case "\$cmd" in
     switch|sw)
-      flags="--from --base --path --fetch --copyignored --copyuntracked --copymodified -h --help"
+      flags="--from --base --path --fetch --copy-all --copy-ignored --copy-untracked --copy-modified -h --help"
       case "\$prev" in
         --from|--base|--path) return 0 ;;
       esac
@@ -740,8 +742,8 @@ _wt() {
     "show help"
     "print shell completion"
   )
-  switch_flags=(--from --base --path --fetch --copyignored --copyuntracked --copymodified -h --help)
-  switch_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
+  switch_flags=(--from --base --path --fetch --copy-all --copy-ignored --copy-untracked --copy-modified -h --help)
+  switch_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "copy ignored, untracked, and modified files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
   exec_flags=(--from --base --path --fetch -h --help --)
   exec_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
   ls_flags=(--base --plain --json -h --help)
@@ -857,9 +859,10 @@ complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l base -r -d 'ba
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l path -r -d 'explicit worktree path'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l fetch -d 'fetch remotes before resolving --from'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -s h -l help -d 'show help'
-complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copyignored -d 'copy gitignored files to new worktree'
-complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copyuntracked -d 'copy untracked files to new worktree'
-complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copymodified -d 'copy modified files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-all -d 'copy ignored, untracked, and modified files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-ignored -d 'copy gitignored files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-untracked -d 'copy untracked files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-modified -d 'copy modified files to new worktree'
 
 complete -c wt -n '__fish_seen_subcommand_from ls' -l base -r -d 'base dir override'
 complete -c wt -n '__fish_seen_subcommand_from ls' -l plain -d 'tab-delimited output'
