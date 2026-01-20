@@ -830,16 +830,22 @@ function wt
       command wt $argv
       return $status
     end
-    set -l out (command wt $argv)
-    set -l rc $status
-    set -l path $out[-1]
+    set -g __wt_rc 0
+    set -l out (begin
+      command wt $argv
+      set -g __wt_rc $status
+    end | string collect | string trim --right)
+    set -l rc $__wt_rc
+    set -e __wt_rc
+    set -l out_lines (string split -- "\n" -- $out)
+    set -l path $out_lines[-1]
     if test $rc -eq 0 -a -n "$path" -a -d "$path"
-      if test (count $out) -gt 1
-        printf '%s\n' $out[1..-2]
+      if test (count $out_lines) -gt 1
+        printf '%s\n' $out_lines[1..-2]
       end
       cd "$path"
     else
-      test -n "$out"; and printf '%s\n' $out
+      test -n "$out"; and printf '%s\n' "$out"
       return $rc
     end
   else
