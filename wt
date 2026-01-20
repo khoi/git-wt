@@ -229,17 +229,17 @@ json_escape() {
 
 list_ignored_files() {
   local root="$1"
-  git -C "$root" ls-files --others --ignored --exclude-standard 2>/dev/null | grep -v '^\.git/'
+  git -C "$root" ls-files --others --ignored --exclude-standard 2>/dev/null | sed '/^\.git\//d'
 }
 
 list_untracked_files() {
   local root="$1"
-  git -C "$root" ls-files --others --exclude-standard 2>/dev/null | grep -v '^\.git/'
+  git -C "$root" ls-files --others --exclude-standard 2>/dev/null | sed '/^\.git\//d'
 }
 
 list_modified_files() {
   local root="$1"
-  git -C "$root" ls-files --modified 2>/dev/null | grep -v '^\.git/'
+  git -C "$root" ls-files --modified 2>/dev/null | sed '/^\.git\//d'
 }
 
 copy_files_to_worktree() {
