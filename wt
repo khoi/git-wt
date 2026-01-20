@@ -599,13 +599,17 @@ wt() {
             ;;
         esac
       done
-      local path
-      path=\$(command wt "\$@")
+      local out path
+      out=\$(command wt "\$@")
       local rc=\$?
-      if [[ \$rc -eq 0 && -d "\$path" ]]; then
+      path=\$(printf '%s\n' "\$out" | tail -n 1)
+      if [[ \$rc -eq 0 && -n "\$path" && -d "\$path" ]]; then
+        if [[ "\$out" != "\$path" ]]; then
+          printf '%s\n' "\$out" | sed '\$d'
+        fi
         cd "\$path"
       else
-        [[ -n "\$path" ]] && echo "\$path"
+        [[ -n "\$out" ]] && printf '%s\n' "\$out"
         return \$rc
       fi
       ;;
@@ -706,13 +710,17 @@ wt() {
             ;;
         esac
       done
-      local path
-      path=\$(command wt "\$@")
+      local out path
+      out=\$(command wt "\$@")
       local rc=\$?
-      if [[ \$rc -eq 0 && -d "\$path" ]]; then
+      path=\$(printf '%s\n' "\$out" | tail -n 1)
+      if [[ \$rc -eq 0 && -n "\$path" && -d "\$path" ]]; then
+        if [[ "\$out" != "\$path" ]]; then
+          printf '%s\n' "\$out" | sed '\$d'
+        fi
         cd "\$path"
       else
-        [[ -n "\$path" ]] && echo "\$path"
+        [[ -n "\$out" ]] && printf '%s\n' "\$out"
         return \$rc
       fi
       ;;
@@ -822,12 +830,16 @@ function wt
       command wt $argv
       return $status
     end
-    set -l path (command wt $argv)
+    set -l out (command wt $argv)
     set -l rc $status
-    if test $rc -eq 0 -a -d "$path"
+    set -l path $out[-1]
+    if test $rc -eq 0 -a -n "$path" -a -d "$path"
+      if test (count $out) -gt 1
+        printf '%s\n' $out[1..-2]
+      end
       cd "$path"
     else
-      test -n "$path"; and echo "$path"
+      test -n "$out"; and printf '%s\n' $out
       return $rc
     end
   else
