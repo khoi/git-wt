@@ -135,6 +135,14 @@ abs_path() {
   esac
 }
 
+normalize_dir() {
+  local path="$1"
+  if [ "$path" != "/" ]; then
+    path="${path%/}"
+  fi
+  printf '%s\n' "$path"
+}
+
 base_dir() {
   local root="$1"
   local override="$2"
@@ -144,12 +152,12 @@ base_dir() {
     chosen="$override"
   fi
   if [ -z "$chosen" ]; then
-    abs_path "$root/.worktrees"
+    normalize_dir "$(abs_path "$root/.worktrees")"
     return
   fi
   case "$chosen" in
-  /*) abs_path "$chosen" ;;
-  *) abs_path "$root/$chosen" ;;
+  /*) normalize_dir "$(abs_path "$chosen")" ;;
+  *) normalize_dir "$(abs_path "$root/$chosen")" ;;
   esac
 }
 
