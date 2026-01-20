@@ -10,6 +10,7 @@ Usage:
 
 Commands:
   switch <branch> create or open a workspace
+  sw <branch>     alias for switch
   exec <branch>   open a workspace and run a command
   ls              list workspaces
   rm <branch>     remove a workspace
@@ -23,7 +24,7 @@ USAGE
 
 switch_usage() {
   cat <<'USAGE'
-wt switch <branch>
+wt switch|sw <branch>
 
 Flags:
   --from <ref>      base ref for new branch
@@ -580,13 +581,13 @@ cmd_root() {
 
 completion_bash() {
   local commands
-  commands="switch exec ls rm here base root help completion"
+  commands="switch sw exec ls rm here base root help completion"
   cat <<EOF
 command -v wt >/dev/null 2>&1 || return 0
 
 wt() {
   case "\$1" in
-    switch)
+    switch|sw)
       local i
       for i in "\$@"; do
         case "\$i" in
@@ -636,7 +637,7 @@ _wt_complete() {
     return 0
   fi
   case "\$cmd" in
-    switch)
+    switch|sw)
       flags="--from --base --path --fetch --copyignored --copyuntracked --copymodified -h --help"
       case "\$prev" in
         --from|--base|--path) return 0 ;;
@@ -673,7 +674,7 @@ _wt_complete() {
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     help)
-      flags="switch exec ls rm here base root help completion"
+      flags="switch sw exec ls rm here base root help completion"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     completion)
@@ -693,7 +694,7 @@ command -v wt >/dev/null 2>&1 || return 0
 
 wt() {
   case "\$1" in
-    switch)
+    switch|sw)
       local i
       for i in "\$@"; do
         case "\$i" in
@@ -726,9 +727,10 @@ __wt_branches() {
 
 _wt() {
   local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs ls_flags ls_descs rm_flags rm_descs hb_flags hb_descs
-  subcmds=(switch exec ls rm here base root help completion)
+  subcmds=(switch sw exec ls rm here base root help completion)
   subdescs=(
     "create or open a workspace"
+    "alias for switch"
     "open a workspace and run a command"
     "list workspaces"
     "remove a workspace"
@@ -754,7 +756,7 @@ _wt() {
   fi
   local cmd=\${words[2]}
   case "\$cmd" in
-    switch)
+    switch|sw)
       if [[ "\${words[CURRENT-1]}" == --from || "\${words[CURRENT-1]}" == --base || "\${words[CURRENT-1]}" == --path ]]; then
         return 0
       fi
@@ -813,7 +815,7 @@ completion_fish() {
 type -q wt; or return
 
 function wt
-  if test "$argv[1]" = "switch"
+  if test "$argv[1]" = "switch" -o "$argv[1]" = "sw"
     if contains -- -h --help $argv
       command wt $argv
       return $status
@@ -839,6 +841,7 @@ end
 
 complete -c wt -f
 complete -c wt -n '__fish_use_subcommand' -a switch -d 'create or open a workspace'
+complete -c wt -n '__fish_use_subcommand' -a sw -d 'alias for switch'
 complete -c wt -n '__fish_use_subcommand' -a exec -d 'open a workspace and run a command'
 complete -c wt -n '__fish_use_subcommand' -a ls -d 'list workspaces'
 complete -c wt -n '__fish_use_subcommand' -a rm -d 'remove a workspace'
@@ -847,16 +850,16 @@ complete -c wt -n '__fish_use_subcommand' -a base -d 'print base dir'
 complete -c wt -n '__fish_use_subcommand' -a root -d 'print main worktree path'
 complete -c wt -n '__fish_use_subcommand' -a help -d 'show help'
 complete -c wt -n '__fish_use_subcommand' -a completion -d 'print shell completion'
-complete -c wt -n '__fish_seen_subcommand_from switch exec rm' -a '(__wt_branches)'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec rm' -a '(__wt_branches)'
 
-complete -c wt -n '__fish_seen_subcommand_from switch exec' -l from -r -d 'base ref for new branch'
-complete -c wt -n '__fish_seen_subcommand_from switch exec' -l base -r -d 'base dir override'
-complete -c wt -n '__fish_seen_subcommand_from switch exec' -l path -r -d 'explicit worktree path'
-complete -c wt -n '__fish_seen_subcommand_from switch exec' -l fetch -d 'fetch remotes before resolving --from'
-complete -c wt -n '__fish_seen_subcommand_from switch exec' -s h -l help -d 'show help'
-complete -c wt -n '__fish_seen_subcommand_from switch' -l copyignored -d 'copy gitignored files to new worktree'
-complete -c wt -n '__fish_seen_subcommand_from switch' -l copyuntracked -d 'copy untracked files to new worktree'
-complete -c wt -n '__fish_seen_subcommand_from switch' -l copymodified -d 'copy modified files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l from -r -d 'base ref for new branch'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l base -r -d 'base dir override'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l path -r -d 'explicit worktree path'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l fetch -d 'fetch remotes before resolving --from'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -s h -l help -d 'show help'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copyignored -d 'copy gitignored files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copyuntracked -d 'copy untracked files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copymodified -d 'copy modified files to new worktree'
 
 complete -c wt -n '__fish_seen_subcommand_from ls' -l base -r -d 'base dir override'
 complete -c wt -n '__fish_seen_subcommand_from ls' -l plain -d 'tab-delimited output'
@@ -868,6 +871,7 @@ complete -c wt -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even
 complete -c wt -n '__fish_seen_subcommand_from rm' -s h -l help -d 'show help'
 
 complete -c wt -n '__fish_seen_subcommand_from help' -a switch -d 'create or open a workspace'
+complete -c wt -n '__fish_seen_subcommand_from help' -a sw -d 'alias for switch'
 complete -c wt -n '__fish_seen_subcommand_from help' -a exec -d 'open a workspace and run a command'
 complete -c wt -n '__fish_seen_subcommand_from help' -a ls -d 'list workspaces'
 complete -c wt -n '__fish_seen_subcommand_from help' -a rm -d 'remove a workspace'
@@ -899,7 +903,7 @@ cmd_help() {
     exit 0
   fi
   case "$1" in
-  switch) switch_usage ;;
+  switch | sw) switch_usage ;;
   exec) exec_usage ;;
   ls) ls_usage ;;
   rm) rm_usage ;;
@@ -926,6 +930,10 @@ help)
   cmd_help "$@"
   ;;
 switch)
+  shift
+  cmd_switch "$@"
+  ;;
+sw)
   shift
   cmd_switch "$@"
   ;;

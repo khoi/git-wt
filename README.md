@@ -27,10 +27,10 @@ wt completion fish | source
 
 ## Common Usages
 
-Open or create a workspace:
+Open or create a workspace (or use `wt sw`):
 
 ```
-wt switch feat-1 --from main 
+wt sw feat-1 --from main 
 
 # and if copying dirty files also
 

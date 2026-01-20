@@ -8,7 +8,7 @@ assert_match "command -v wt >/dev/null 2>&1 || return 0" "$out"
 assert_match "compopt +o default +o bashdefault" "$out"
 assert_match "complete -F _wt_complete wt" "$out"
 assert_match "__wt_branches" "$out"
-assert_match "switch exec ls rm here base root help completion" "$out"
+assert_match "switch sw exec ls rm here base root help completion" "$out"
 assert_match "wt()" "$out"
 assert_match "command wt" "$out"
 assert_match 'cd "\$path"' "$out"
@@ -64,7 +64,7 @@ help_flags() {
 bash_flags() {
   printf '%s\n' "$completion_bash" | awk -v cmd="$1" '
     $0 ~ /case ".*cmd.*" in/ {in_case=1; next}
-    in_case && $0 ~ "^[[:space:]]*"cmd"\\)" {section=1; next}
+    in_case && $0 ~ "^[[:space:]]*[^)]*"cmd"[^)]*\\)" {section=1; next}
     section && $0 ~ /flags="/ {
       sub(/.*flags="/, "")
       sub(/".*/, "")
@@ -116,9 +116,13 @@ subcmds=$("$WT_BIN" --help | awk '
 for cmd in $subcmds; do
   hf=$(help_flags "$cmd")
   [ -n "$hf" ] || continue
-  bf=$(bash_flags "$cmd")
-  zf=$(zsh_flags "$cmd")
-  ff=$(fish_flags "$cmd")
+  comp_cmd="$cmd"
+  if [ "$cmd" = "sw" ]; then
+    comp_cmd="switch"
+  fi
+  bf=$(bash_flags "$comp_cmd")
+  zf=$(zsh_flags "$comp_cmd")
+  ff=$(fish_flags "$comp_cmd")
   for flag in $hf; do
     assert_flag_in "$flag" "$bf" "bash $cmd"
     assert_flag_in "$flag" "$zf" "zsh $cmd"
