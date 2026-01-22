@@ -127,7 +127,11 @@ die() {
 }
 
 require_repo() {
-  git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
+  local err
+  if ! err=$(git rev-parse --git-dir 2>&1); then
+    printf '%s\n' "$err" >&2
+    die "not a git repository"
+  fi
 }
 
 main_worktree_path() {
@@ -254,22 +258,22 @@ json_escape() {
 
 list_ignored_files() {
   local root="$1"
-  git -C "$root" ls-files --others --ignored --exclude-standard 2>/dev/null | sed '/^\.git\//d'
+  git -C "$root" ls-files --others --ignored --exclude-standard | sed '/^\.git\//d'
 }
 
 list_untracked_files() {
   local root="$1"
-  git -C "$root" ls-files --others --exclude-standard 2>/dev/null | sed '/^\.git\//d'
+  git -C "$root" ls-files --others --exclude-standard | sed '/^\.git\//d'
 }
 
 list_modified_files() {
   local root="$1"
-  git -C "$root" ls-files --modified 2>/dev/null | sed '/^\.git\//d'
+  git -C "$root" ls-files --modified | sed '/^\.git\//d'
 }
 
 list_tracked_files() {
   local root="$1"
-  git -C "$root" ls-files 2>/dev/null | sed '/^\.git\//d'
+  git -C "$root" ls-files | sed '/^\.git\//d'
 }
 
 collect_copy_files() {
@@ -393,20 +397,22 @@ open_path() {
       die "worktree path already in use: '$path'"
     fi
     mkdir -p "$(dirname "$path")"
-    git -C "$root" worktree add "$path" "$branch" >/dev/null 2>&1
+    git -C "$root" worktree add "$path" "$branch"
     copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
     printf '%s\n' "$path"
     return 0
   fi
   if [ "$fetch" -eq 1 ]; then
-    git -C "$root" fetch >/dev/null 2>&1
+    git -C "$root" fetch
   fi
   if [ -z "$from" ]; then
     from=$(git -C "$root" rev-parse HEAD)
   fi
-  git -C "$root" rev-parse --verify "${from}^{commit}" >/dev/null 2>&1 || die "invalid --from ref '$from'"
+  if ! git -C "$root" rev-parse --verify "${from}^{commit}" >/dev/null; then
+    die "invalid --from ref '$from'"
+  fi
   mkdir -p "$(dirname "$path")"
-  git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null 2>&1
+  git -C "$root" worktree add -b "$branch" "$path" "$from"
   copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
   printf '%s\n' "$path"
 }
@@ -691,14 +697,14 @@ cmd_rm() {
     fi
   fi
   if [ "$force" -eq 1 ]; then
-    git -C "$root" worktree remove --force "$path" >/dev/null 2>&1
+    git -C "$root" worktree remove --force "$path"
   else
-    git -C "$root" worktree remove "$path" >/dev/null 2>&1
+    git -C "$root" worktree remove "$path"
   fi
   if [ "$force" -eq 1 ]; then
-    git -C "$root" branch -D "$branch" >/dev/null 2>&1
+    git -C "$root" branch -D "$branch"
   else
-    git -C "$root" branch -d "$branch" >/dev/null 2>&1
+    git -C "$root" branch -d "$branch"
   fi
   printf '%s\n' "$path"
 }
