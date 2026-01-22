@@ -38,6 +38,18 @@ wt switch feat-2 --from main \
   --copy-all
 ```
 
+Sync files from the main worktree to the current worktree:
+
+```
+wt sync --copy-modified
+```
+
+Sync between two existing worktrees:
+
+```
+wt sync main feat-1 --copy-all
+```
+
 Return to main worktree:
 
 ```
