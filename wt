@@ -834,7 +834,7 @@ type -q wt; or return
 
 function wt
   if test "$argv[1]" = "switch" -o "$argv[1]" = "sw"
-    if contains -- -h --help $argv
+    if contains -- -h $argv; or contains -- --help $argv
       command wt $argv
       return $status
     end
@@ -845,7 +845,7 @@ function wt
     end | string collect | string trim --right)
     set -l rc $__wt_rc
     set -e __wt_rc
-    set -l out_lines (string split -- "\n" -- $out)
+    set -l out_lines (string split -- "\n" $out)
     set -l path $out_lines[-1]
     if test $rc -eq 0 -a -n "$path" -a -d "$path"
       if test (count $out_lines) -gt 1
