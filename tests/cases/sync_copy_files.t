@@ -1,0 +1,48 @@
+#!/bin/bash
+set -euo pipefail
+
+source "$ROOT/tests/lib/common.sh"
+
+repo=$(new_repo)
+trap 'cleanup_repo "$repo"' EXIT
+
+cd "$repo"
+
+echo "secret" > .env
+echo "*.env" >> .gitignore
+git add .gitignore
+git commit -m "add gitignore" >/dev/null
+
+echo "untracked" > untracked.txt
+echo "modified" >> README.md
+
+path=$("$WT_BIN" switch feat-sync --from main)
+
+cd "$path"
+"$WT_BIN" sync --copy-ignored --copy-untracked --copy-modified
+
+[ -f "$path/.env" ] || fail ".env not copied (copy-ignored)"
+[ "$(cat "$path/.env")" = "secret" ] || fail ".env content mismatch"
+
+[ -f "$path/untracked.txt" ] || fail "untracked.txt not copied (copy-untracked)"
+[ "$(cat "$path/untracked.txt")" = "untracked" ] || fail "untracked.txt content mismatch"
+
+[ -f "$path/README.md" ] || fail "README.md not copied (copy-modified)"
+assert_match "modified" "$(cat "$path/README.md")"
+
+if "$WT_BIN" sync; then
+  fail "expected missing copy flag"
+fi
+
+cd "$repo"
+echo "source" > conflict.txt
+
+cd "$path"
+echo "dest" > conflict.txt
+
+if "$WT_BIN" sync --copy-untracked; then
+  fail "expected conflict"
+fi
+
+"$WT_BIN" sync -f --copy-untracked
+[ "$(cat "$path/conflict.txt")" = "source" ] || fail "conflict.txt not overwritten"
