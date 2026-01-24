@@ -6,7 +6,11 @@ usage() {
 wt - A simple git worktree sugar
 
 Usage:
-  wt <command>
+  wt [--base-dir <dir>] <command>
+
+Global Flags:
+  --base-dir <dir>  base dir override
+  -h, --help        show help
 
 Commands:
   switch <branch> create or open a workspace
@@ -29,7 +33,6 @@ wt switch|sw <branch>
 
 Flags:
   --from <ref>      base ref for new branch
-  --base <dir>      base dir override
   --path <dir>      explicit worktree path
   --fetch           fetch remotes before resolving --from
   --copy-all        copy all files to new worktree
@@ -46,7 +49,6 @@ wt exec <branch> -- <cmd...>
 
 Flags:
   --from <ref>    base ref for new branch
-  --base <dir>    base dir override
   --path <dir>    explicit worktree path
   --fetch         fetch remotes before resolving --from
   -h, --help      show help
@@ -74,7 +76,6 @@ ls_usage() {
 wt ls
 
 Flags:
-  --base <dir>    base dir override
   --plain         tab-delimited output
   --json          JSON output
   -h, --help      show help
@@ -87,7 +88,6 @@ wt rm <branch>
 
 Flags:
   -f, --force     remove even if dirty
-  --base <dir>    base dir override
   -h, --help      show help
 USAGE
 }
@@ -125,6 +125,8 @@ die() {
   printf 'error: %s\n' "$1" >&2
   exit 1
 }
+
+BASE_DIR_OVERRIDE=""
 
 require_repo() {
   local err
@@ -397,7 +399,7 @@ open_path() {
       die "worktree path already in use: '$path'"
     fi
     mkdir -p "$(dirname "$path")"
-    git -C "$root" worktree add "$path" "$branch"
+    git -C "$root" worktree add "$path" "$branch" >/dev/null
     copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
     printf '%s\n' "$path"
     return 0
@@ -412,13 +414,13 @@ open_path() {
     die "invalid --from ref '$from'"
   fi
   mkdir -p "$(dirname "$path")"
-  git -C "$root" worktree add -b "$branch" "$path" "$from"
+  git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null
   copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
   printf '%s\n' "$path"
 }
 
 cmd_switch() {
-  local from="" base_override="" path_override="" fetch=0 branch=""
+  local from="" path_override="" fetch=0 branch=""
   local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -432,12 +434,6 @@ cmd_switch() {
       shift
       ;;
     --from=*) from="${1#--from=}" ;;
-    --base)
-      [ -n "${2:-}" ] || die "missing value for --base"
-      base_override="$2"
-      shift
-      ;;
-    --base=*) base_override="${1#--base=}" ;;
     --path)
       [ -n "${2:-}" ] || die "missing value for --path"
       path_override="$2"
@@ -455,11 +451,11 @@ cmd_switch() {
     shift
   done
   [ -n "$branch" ] || die "missing branch"
-  open_path "$branch" "$from" "$base_override" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
+  open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
 }
 
 cmd_exec() {
-  local from="" base_override="" path_override="" fetch=0 branch=""
+  local from="" path_override="" fetch=0 branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
     -h | --help)
@@ -472,12 +468,6 @@ cmd_exec() {
       shift
       ;;
     --from=*) from="${1#--from=}" ;;
-    --base)
-      [ -n "${2:-}" ] || die "missing value for --base"
-      base_override="$2"
-      shift
-      ;;
-    --base=*) base_override="${1#--base=}" ;;
     --path)
       [ -n "${2:-}" ] || die "missing value for --path"
       path_override="$2"
@@ -500,7 +490,7 @@ cmd_exec() {
   [ -n "$branch" ] || die "missing branch"
   [ "$#" -gt 0 ] || die "missing command"
   local path
-  path=$(open_path "$branch" "$from" "$base_override" "$path_override" "$fetch")
+  path=$(open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch")
   cd "$path"
   exec "$@"
 }
@@ -576,19 +566,13 @@ cmd_sync() {
 }
 
 cmd_ls() {
-  local base_override="" plain=0 json=0
+  local plain=0 json=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
     -h | --help)
       ls_usage
       exit 0
       ;;
-    --base)
-      [ -n "${2:-}" ] || die "missing value for --base"
-      base_override="$2"
-      shift
-      ;;
-    --base=*) base_override="${1#--base=}" ;;
     --plain) plain=1 ;;
     --json) json=1 ;;
     --*) die "unknown flag '$1'" ;;
@@ -599,7 +583,6 @@ cmd_ls() {
   require_repo
   local root base
   root=$(main_worktree_path)
-  base=$(base_dir "$root" "$base_override")
   if [ "$plain" -eq 1 ] && [ "$json" -eq 1 ]; then
     die "cannot use --plain and --json together"
   fi
@@ -614,19 +597,32 @@ cmd_ls() {
   local entries
   entries=$(worktree_entries "$root")
   local filtered=""
-  while IFS= read -r entry; do
-    [ -n "$entry" ] || continue
-    local path head branch
-    path=${entry%%$'\t'*}
-    head=${entry#*$'\t'}
-    branch=${head#*$'\t'}
-    head=${head%%$'\t'*}
-    case "$path" in
-    "$base"/*)
+  if [ -n "$BASE_DIR_OVERRIDE" ]; then
+    base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      local path head branch
+      path=${entry%%$'\t'*}
+      head=${entry#*$'\t'}
+      branch=${head#*$'\t'}
+      head=${head%%$'\t'*}
+      case "$path" in
+      "$base"/*)
+        filtered+="$branch\t$path\t$head\n"
+        ;;
+      esac
+    done <<<"$entries"
+  else
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      local path head branch
+      path=${entry%%$'\t'*}
+      head=${entry#*$'\t'}
+      branch=${head#*$'\t'}
+      head=${head%%$'\t'*}
       filtered+="$branch\t$path\t$head\n"
-      ;;
-    esac
-  done <<<"$entries"
+    done <<<"$entries"
+  fi
   case "$mode" in
   json)
     printf '['
@@ -651,7 +647,7 @@ cmd_ls() {
 }
 
 cmd_rm() {
-  local force=0 base_override="" branch=""
+  local force=0 branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
     -h | --help)
@@ -659,12 +655,6 @@ cmd_rm() {
       exit 0
       ;;
     -f | --force) force=1 ;;
-    --base)
-      [ -n "${2:-}" ] || die "missing value for --base"
-      base_override="$2"
-      shift
-      ;;
-    --base=*) base_override="${1#--base=}" ;;
     --*) die "unknown flag '$1'" ;;
     *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
     esac
@@ -674,7 +664,7 @@ cmd_rm() {
   require_repo
   local root base path
   root=$(main_worktree_path)
-  base=$(base_dir "$root" "$base_override")
+  base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
   if ! path=$(find_worktree_by_branch "$root" "$branch"); then
     die "workspace not found: '$branch'"
   fi
@@ -713,7 +703,7 @@ cmd_here() {
   require_repo
   local root base current
   root=$(main_worktree_path)
-  base=$(base_dir "$root" "")
+  base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
   current=$(git rev-parse --show-toplevel)
   case "$current" in
   "$base"/*) ;;
@@ -739,7 +729,7 @@ cmd_base() {
   require_repo
   local root base
   root=$(main_worktree_path)
-  base=$(base_dir "$root" "")
+  base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
   printf '%s\n' "$base"
 }
 
@@ -795,32 +785,58 @@ _wt_complete() {
   local cur prev cmd
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  cmd="\${COMP_WORDS[1]}"
+  cmd=""
   compopt +o default +o bashdefault 2>/dev/null
   local commands="$commands"
   local flags=""
   local i
+  local global_flags="--base-dir -h --help"
   for i in "\${COMP_WORDS[@]}"; do
     if [ "\$i" = "--" ]; then
       return 0
     fi
   done
-  if [ "\$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( \$(compgen -W "\$commands" -- "\$cur") )
+  if [ "\$prev" = "--base-dir" ]; then
+    return 0
+  fi
+  i=1
+  while [ "\$i" -lt "\$COMP_CWORD" ]; do
+    local word="\${COMP_WORDS[\$i]}"
+    case "\$word" in
+      --base-dir)
+        i=\$((i + 2))
+        ;;
+      --base-dir=*)
+        i=\$((i + 1))
+        ;;
+      -h|--help)
+        i=\$((i + 1))
+        ;;
+      --*)
+        i=\$((i + 1))
+        ;;
+      *)
+        cmd="\$word"
+        break
+        ;;
+    esac
+  done
+  if [ -z "\$cmd" ]; then
+    COMPREPLY=( \$(compgen -W "\$global_flags \$commands" -- "\$cur") )
     return 0
   fi
   case "\$cmd" in
     switch|sw)
-      flags="--from --base --path --fetch --copy-all --copy-ignored --copy-untracked --copy-modified -h --help"
+      flags="--from --path --fetch --copy-all --copy-ignored --copy-untracked --copy-modified -h --help"
       case "\$prev" in
-        --from|--base|--path) return 0 ;;
+        --from|--path) return 0 ;;
       esac
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
     exec)
-      flags="--from --base --path --fetch -h --help --"
+      flags="--from --path --fetch -h --help --"
       case "\$prev" in
-        --from|--base|--path|--) return 0 ;;
+        --from|--path|--) return 0 ;;
       esac
       if [ "\$COMP_CWORD" -eq 2 ]; then
         COMPREPLY=( \$(compgen -W "\$(__wt_branches)" -- "\$cur") )
@@ -833,17 +849,11 @@ _wt_complete() {
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
     rm)
-      flags="--base -f --force -h --help"
-      case "\$prev" in
-        --base) return 0 ;;
-      esac
+      flags="-f --force -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
     ls)
-      flags="--base --plain --json -h --help"
-      case "\$prev" in
-        --base) return 0 ;;
-      esac
+      flags="--plain --json -h --help"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     here|base|root)
@@ -907,7 +917,7 @@ __wt_branches() {
 }
 
 _wt() {
-  local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs sync_flags sync_descs ls_flags ls_descs rm_flags rm_descs hb_flags hb_descs
+  local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs sync_flags sync_descs ls_flags ls_descs rm_flags rm_descs hb_flags hb_descs global_flags global_descs
   subcmds=(switch sw exec sync ls rm here base root help completion)
   subdescs=(
     "create or open a workspace"
@@ -922,26 +932,59 @@ _wt() {
     "show help"
     "print shell completion"
   )
-  switch_flags=(--from --base --path --fetch --copy-all --copy-ignored --copy-untracked --copy-modified -h --help)
-  switch_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "copy all files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
-  exec_flags=(--from --base --path --fetch -h --help --)
-  exec_descs=("base ref for new branch" "base dir override" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
+  global_flags=(--base-dir -h --help)
+  global_descs=("base dir override" "show help" "show help")
+  switch_flags=(--from --path --fetch --copy-all --copy-ignored --copy-untracked --copy-modified -h --help)
+  switch_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "copy all files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
+  exec_flags=(--from --path --fetch -h --help --)
+  exec_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
   sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -h --help)
   sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "overwrite conflicting destination files" "overwrite conflicting destination files" "show help" "show help")
-  ls_flags=(--base --plain --json -h --help)
-  ls_descs=("base dir override" "tab-delimited output" "JSON output" "show help" "show help")
-  rm_flags=(--base -f --force -h --help)
-  rm_descs=("base dir override" "remove even if dirty" "remove even if dirty" "show help" "show help")
+  ls_flags=(--plain --json -h --help)
+  ls_descs=("tab-delimited output" "JSON output" "show help" "show help")
+  rm_flags=(-f --force -h --help)
+  rm_descs=("remove even if dirty" "remove even if dirty" "show help" "show help")
   hb_flags=(-h --help)
   hb_descs=("show help" "show help")
   if (( CURRENT == 2 )); then
+    compadd -d global_descs -- \$global_flags
     compadd -d subdescs -- \$subcmds
     return 0
   fi
-  local cmd=\${words[2]}
+  local cmd=""
+  local idx=2
+  while (( idx <= CURRENT )); do
+    local word=\${words[idx]}
+    case "\$word" in
+      --base-dir)
+        idx=\$((idx + 2))
+        ;;
+      --base-dir=*)
+        idx=\$((idx + 1))
+        ;;
+      -h|--help)
+        idx=\$((idx + 1))
+        ;;
+      --*)
+        idx=\$((idx + 1))
+        ;;
+      *)
+        cmd=\$word
+        break
+        ;;
+    esac
+  done
+  if [[ "\${words[CURRENT-1]}" == --base-dir ]]; then
+    return 0
+  fi
+  if [[ -z "\$cmd" ]]; then
+    compadd -d global_descs -- \$global_flags
+    compadd -d subdescs -- \$subcmds
+    return 0
+  fi
   case "\$cmd" in
     switch|sw)
-      if [[ "\${words[CURRENT-1]}" == --from || "\${words[CURRENT-1]}" == --base || "\${words[CURRENT-1]}" == --path ]]; then
+      if [[ "\${words[CURRENT-1]}" == --from || "\${words[CURRENT-1]}" == --path ]]; then
         return 0
       fi
       compadd -d switch_descs -- \$switch_flags
@@ -949,7 +992,7 @@ _wt() {
       return 0
       ;;
     exec)
-      if [[ "\${words[CURRENT-1]}" == --from || "\${words[CURRENT-1]}" == --base || "\${words[CURRENT-1]}" == --path || "\${words[CURRENT-1]}" == -- ]]; then
+      if [[ "\${words[CURRENT-1]}" == --from || "\${words[CURRENT-1]}" == --path || "\${words[CURRENT-1]}" == -- ]]; then
         return 0
       fi
       if (( CURRENT == 3 )); then
@@ -965,17 +1008,11 @@ _wt() {
       return 0
       ;;
     rm)
-      if [[ "\${words[CURRENT-1]}" == --base ]]; then
-        return 0
-      fi
       compadd -d rm_descs -- \$rm_flags
       compadd -- \${(f)"\$(__wt_branches)"}
       return 0
       ;;
     ls)
-      if [[ "\${words[CURRENT-1]}" == --base ]]; then
-        return 0
-      fi
       compadd -d ls_descs -- \$ls_flags
       return 0
       ;;
@@ -1039,6 +1076,8 @@ function __wt_branches
 end
 
 complete -c wt -f
+complete -c wt -l base-dir -r -d 'base dir override'
+complete -c wt -s h -l help -d 'show help'
 complete -c wt -n '__fish_use_subcommand' -a switch -d 'create or open a workspace'
 complete -c wt -n '__fish_use_subcommand' -a sw -d 'alias for switch'
 complete -c wt -n '__fish_use_subcommand' -a exec -d 'open a workspace and run a command'
@@ -1053,7 +1092,6 @@ complete -c wt -n '__fish_use_subcommand' -a completion -d 'print shell completi
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec sync rm' -a '(__wt_branches)'
 
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l from -r -d 'base ref for new branch'
-complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l base -r -d 'base dir override'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l path -r -d 'explicit worktree path'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l fetch -d 'fetch remotes before resolving --from'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -s h -l help -d 'show help'
@@ -1068,12 +1106,10 @@ complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-modified -d 'copy m
 complete -c wt -n '__fish_seen_subcommand_from sync' -s f -l force -d 'overwrite conflicting destination files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s h -l help -d 'show help'
 
-complete -c wt -n '__fish_seen_subcommand_from ls' -l base -r -d 'base dir override'
 complete -c wt -n '__fish_seen_subcommand_from ls' -l plain -d 'tab-delimited output'
 complete -c wt -n '__fish_seen_subcommand_from ls' -l json -d 'JSON output'
 complete -c wt -n '__fish_seen_subcommand_from ls' -s h -l help -d 'show help'
 
-complete -c wt -n '__fish_seen_subcommand_from rm' -l base -r -d 'base dir override'
 complete -c wt -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even if dirty'
 complete -c wt -n '__fish_seen_subcommand_from rm' -s h -l help -d 'show help'
 
@@ -1124,6 +1160,25 @@ cmd_help() {
   *) die "unknown command '$1'" ;;
   esac
 }
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+  --base-dir)
+    [ -n "${2:-}" ] || die "missing value for --base-dir"
+    BASE_DIR_OVERRIDE="$2"
+    shift 2
+    ;;
+  --base-dir=*)
+    BASE_DIR_OVERRIDE="${1#--base-dir=}"
+    shift
+    ;;
+  -h | --help)
+    break
+    ;;
+  --*) die "unknown flag '$1'" ;;
+  *) break ;;
+  esac
+done
 
 case "${1:-}" in
 "")

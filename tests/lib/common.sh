@@ -24,6 +24,23 @@ assert_match() {
   fi
 }
 
+run_cmd() {
+  local err_file
+  err_file=$(mktemp)
+  set +e
+  RUN_OUT=$("$@" 2> "$err_file")
+  RUN_RC=$?
+  set -e
+  RUN_ERR=$(cat "$err_file")
+  rm -f "$err_file"
+}
+
+assert_rc() {
+  if [ "$RUN_RC" -ne "$1" ]; then
+    fail "expected exit code $1, got $RUN_RC"
+  fi
+}
+
 new_repo() {
   local dir
   dir=$(mktemp -d)

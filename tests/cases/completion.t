@@ -9,6 +9,7 @@ assert_match "compopt +o default +o bashdefault" "$out"
 assert_match "complete -F _wt_complete wt" "$out"
 assert_match "__wt_branches" "$out"
 assert_match "switch sw exec sync ls rm here base root help completion" "$out"
+assert_match "--base-dir" "$out"
 assert_match "wt()" "$out"
 assert_match "command wt" "$out"
 assert_match 'cd "\$path"' "$out"
@@ -21,6 +22,7 @@ assert_match "create or open a workspace" "$out"
 assert_match "print shell completion" "$out"
 assert_match "base dir override" "$out"
 assert_match "tab-delimited output" "$out"
+assert_match "--base-dir" "$out"
 assert_match "return 0" "$out"
 assert_match "wt()" "$out"
 assert_match "command wt" "$out"
@@ -35,6 +37,7 @@ assert_match "create or open a workspace" "$out"
 assert_match "print shell completion" "$out"
 assert_match "base dir override" "$out"
 assert_match "tab-delimited output" "$out"
+assert_match "base-dir" "$out"
 assert_match "function wt" "$out"
 assert_match "command wt" "$out"
 assert_match 'cd "\$path"' "$out"
@@ -61,6 +64,20 @@ help_flags() {
   ' | sort -u
 }
 
+global_help_flags() {
+  "$WT_BIN" --help | awk '
+    /^Global Flags:/ {section=1; next}
+    section && NF==0 {exit}
+    section {
+      for (i=1; i<=NF; i++) {
+        t=$i
+        gsub(/,/, "", t)
+        if (t ~ /^-/) print t
+      }
+    }
+  ' | sort -u
+}
+
 bash_flags() {
   printf '%s\n' "$completion_bash" | awk -v cmd="$1" '
     $0 ~ /case ".*cmd.*" in/ {in_case=1; next}
@@ -75,14 +92,48 @@ bash_flags() {
   ' | tr ' ' '\n' | awk 'NF' | sort -u
 }
 
-zsh_flags() {
-  printf '%s\n' "$completion_zsh" | awk -v cmd="$1" '
-    $0 ~ cmd"_flags=\\(" {
+bash_global_flags() {
+  printf '%s\n' "$completion_bash" | awk '
+    /global_flags="/ {
       line=$0
-      sub(".*"cmd"_flags=\\(", "", line)
-      sub("\\).*", "", line)
+      sub(/.*global_flags="/, "", line)
+      sub(/".*/, "", line)
       print line
       exit
+    }
+  ' | tr ' ' '\n' | awk 'NF' | sort -u
+}
+
+zsh_flags() {
+  printf '%s\n' "$completion_zsh" | awk -v cmd="$1" '
+    index($0, cmd "_flags=(") {
+      line=$0
+      start=index(line, cmd "_flags=(")
+      if (start > 0) {
+        line=substr(line, start + length(cmd "_flags=("))
+        end=index(line, ")")
+        if (end > 0) {
+          print substr(line, 1, end - 1)
+          exit
+        }
+      }
+    }
+  ' | tr ' ' '\n' | awk 'NF' | sort -u
+}
+
+zsh_global_flags() {
+  printf '%s\n' "$completion_zsh" | awk '
+    index($0, "global_flags=(") {
+      line=$0
+      start=index(line, "global_flags=(")
+      if (start > 0) {
+        line=substr(line, start + length("global_flags=("))
+        end=index(line, ")")
+        if (end > 0) {
+          print substr(line, 1, end - 1)
+          exit
+        }
+      }
     }
   ' | tr ' ' '\n' | awk 'NF' | sort -u
 }
@@ -100,12 +151,33 @@ fish_flags() {
   ' | sort -u
 }
 
+fish_global_flags() {
+  printf '%s\n' "$completion_fish" | awk '
+    $0 ~ /^complete -c wt/ && $0 !~ /-n / {
+      for (i=1; i<=NF; i++) {
+        if ($i == "-l" && (i+1) <= NF) print "--"$(i+1)
+        if ($i == "-s" && (i+1) <= NF) print "-"$(i+1)
+      }
+    }
+  ' | sort -u
+}
+
 assert_flag_in() {
   local flag="$1"
   local flags="$2"
   local where="$3"
   printf '%s\n' "$flags" | grep -qx -- "$flag" || fail "missing $flag in $where completion"
 }
+
+ghf=$(global_help_flags)
+bgf=$(bash_global_flags)
+zgf=$(zsh_global_flags)
+fgf=$(fish_global_flags)
+for flag in $ghf; do
+  assert_flag_in "$flag" "$bgf" "bash global"
+  assert_flag_in "$flag" "$zgf" "zsh global"
+  assert_flag_in "$flag" "$fgf" "fish global"
+done
 
 subcmds=$("$WT_BIN" --help | awk '
   /^Commands:/ {section=1; next}
