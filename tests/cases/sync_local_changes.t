@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+source "$ROOT/tests/lib/common.sh"
+
+repo=$(new_repo)
+trap 'cleanup_repo "$repo"' EXIT
+
+cd "$repo"
+
+path=$("$WT_BIN" switch feat-1 --from main)
+
+echo "modified main" >> README.md
+
+echo "modified in worktree" >> "$path/README.md"
+
+run_cmd "$WT_BIN" sync main feat-1 --copy-modified
+assert_rc 1
+assert_match "destination file has local changes" "$RUN_ERR"
+
+"$WT_BIN" sync main feat-1 --copy-modified --force
+assert_match "modified main" "$(cat "$path/README.md")"
