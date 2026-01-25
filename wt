@@ -326,6 +326,13 @@ copy_files_to_worktree() {
   done <<< "$files"
 }
 
+init_submodules() {
+  local root="$1"
+  local path="$2"
+  [ -f "$root/.gitmodules" ] || return 0
+  git -C "$path" submodule update --init --recursive >/dev/null 2>&1 || true
+}
+
 copy_files_between() {
   local src="$1"
   local dst="$2"
@@ -400,6 +407,7 @@ open_path() {
     fi
     mkdir -p "$(dirname "$path")"
     git -C "$root" worktree add "$path" "$branch" >/dev/null
+    init_submodules "$root" "$path"
     copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
     printf '%s\n' "$path"
     return 0
@@ -415,6 +423,7 @@ open_path() {
   fi
   mkdir -p "$(dirname "$path")"
   git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null
+  init_submodules "$root" "$path"
   copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
   printf '%s\n' "$path"
 }
