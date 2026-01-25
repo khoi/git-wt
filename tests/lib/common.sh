@@ -53,6 +53,34 @@ new_repo() {
   printf '%s\n' "$dir"
 }
 
+new_repo_with_submodule() {
+  local repo sub
+  sub=$(mktemp -d)
+  git -C "$sub" init -b main >/dev/null
+  git -C "$sub" config user.email "test@example.com"
+  git -C "$sub" config user.name "test"
+  printf 'sub\n' > "$sub/README.md"
+  git -C "$sub" add README.md
+  git -C "$sub" commit -m "sub init" >/dev/null
+
+  repo=$(mktemp -d)
+  git -C "$repo" init -b main >/dev/null
+  git -C "$repo" config user.email "test@example.com"
+  git -C "$repo" config user.name "test"
+  printf 'root\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -m "init" >/dev/null
+
+  git -C "$repo" -c protocol.file.allow=always submodule add "$sub" sub >/dev/null
+  git -C "$repo" commit -m "add submodule" >/dev/null
+
+  SUBMODULE_REPO="$sub"
+  REPO_WITH_SUBMODULE="$repo"
+  export SUBMODULE_REPO
+  export REPO_WITH_SUBMODULE
+  printf '%s\n' "$repo"
+}
+
 cleanup_repo() {
   local dir="$1"
   rm -rf "$dir"

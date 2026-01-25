@@ -330,7 +330,7 @@ init_submodules() {
   local root="$1"
   local path="$2"
   [ -f "$root/.gitmodules" ] || return 0
-  git -C "$path" submodule update --init --recursive >/dev/null 2>&1 || true
+  git -C "$path" -c protocol.file.allow=always submodule update --init --recursive >/dev/null 2>&1 || true
 }
 
 copy_files_between() {

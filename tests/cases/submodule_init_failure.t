@@ -3,7 +3,8 @@ set -euo pipefail
 
 source "$ROOT/tests/lib/common.sh"
 
-repo=$(new_repo_with_submodule)
+new_repo_with_submodule >/dev/null
+repo="$REPO_WITH_SUBMODULE"
 sub="$SUBMODULE_REPO"
 trap 'cleanup_repo "$repo"; cleanup_repo "$sub"' EXIT
 
