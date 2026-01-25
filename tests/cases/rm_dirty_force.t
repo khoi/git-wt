@@ -11,9 +11,9 @@ path=$("$WT_BIN" switch feat-1 --from main)
 
 printf 'change\n' >> "$path/README.md"
 
-if "$WT_BIN" rm feat-1 </dev/null >/dev/null 2>&1; then
-  fail "expected failure on dirty workspace"
-fi
+run_cmd "$WT_BIN" rm feat-1 </dev/null
+assert_rc 1
+assert_match "workspace dirty" "$RUN_ERR"
 
 "$WT_BIN" rm -f feat-1 >/dev/null
 [ ! -d "$path" ] || fail "worktree path still exists"

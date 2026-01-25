@@ -671,16 +671,14 @@ cmd_rm() {
   done
   [ -n "$branch" ] || die "missing branch"
   require_repo
-  local root base path
+  local root path
   root=$(main_worktree_path)
-  base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
   if ! path=$(find_worktree_by_branch "$root" "$branch"); then
     die "workspace not found: '$branch'"
   fi
-  case "$path" in
-  "$base"/*) ;;
-  *) die "workspace not under base: '$path'" ;;
-  esac
+  if [ "$path" = "$root" ]; then
+    die "cannot remove main worktree"
+  fi
   local dirty
   dirty=$(git -C "$path" status --porcelain)
   if [ -n "$dirty" ] && [ "$force" -eq 0 ]; then

@@ -20,8 +20,9 @@ assert_rc 1
 assert_match "unknown flag" "$RUN_ERR"
 
 run_cmd "$WT_BIN" --base-dir "$alt_base" rm feat-1
-assert_rc 1
-assert_match "workspace not under base" "$RUN_ERR"
-
-"$WT_BIN" rm feat-1 >/dev/null
+assert_rc 0
 [ ! -d "$path" ] || fail "worktree path still exists"
+
+run_cmd "$WT_BIN" rm feat-1
+assert_rc 1
+assert_match "workspace not found" "$RUN_ERR"
