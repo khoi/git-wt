@@ -330,13 +330,7 @@ init_submodules() {
   local root="$1"
   local path="$2"
   [ -f "$root/.gitmodules" ] || return 0
-  local allow=""
-  allow=$(git -C "$path" config --get protocol.file.allow 2>/dev/null || true)
-  if [ -z "$allow" ] || [ "$allow" = "never" ]; then
-    git -C "$path" submodule update --init --recursive >/dev/null 2>&1 || true
-    return 0
-  fi
-  git -C "$path" -c protocol.file.allow=always submodule update --init --recursive >/dev/null 2>&1 || true
+  git -C "$path" submodule update --init --recursive >/dev/null 2>&1 || true
 }
 
 copy_files_between() {
@@ -684,13 +678,6 @@ cmd_rm() {
   fi
   if [ "$path" = "$root" ]; then
     die "cannot remove main worktree"
-  fi
-  local current
-  current=$(git rev-parse --show-toplevel 2>/dev/null || true)
-  if [ -n "$current" ]; then
-    if [ "$(normalize_dir "$current")" = "$(normalize_dir "$path")" ]; then
-      die "cannot remove current worktree; cd to another worktree first (try: cd \"\$(wt root)\")"
-    fi
   fi
   local dirty
   dirty=$(git -C "$path" status --porcelain)
