@@ -7,8 +7,8 @@ if ! command -v fish >/dev/null 2>&1; then
   exit 0
 fi
 
-repo=$(new_repo)
-trap 'cleanup_repo "$repo"' EXIT
+setup_repo
+repo="$REPO"
 
 repo_real=$(cd "$repo" && pwd -P)
 branch="fish-test"

@@ -3,7 +3,8 @@ set -euo pipefail
 
 source "$ROOT/tests/lib/common.sh"
 
-repo=$(new_repo)
+setup_repo
+repo="$REPO"
 base=$(mktemp -d)
 base=$(cd "$base" && pwd -P)
 trap 'cleanup_repo "$repo"; rm -rf "$base"' EXIT

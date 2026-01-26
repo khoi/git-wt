@@ -53,6 +53,12 @@ new_repo() {
   printf '%s\n' "$dir"
 }
 
+setup_repo() {
+  REPO=$(new_repo)
+  export REPO
+  trap "cleanup_repo '$REPO'" EXIT
+}
+
 new_repo_with_submodule() {
   local repo sub
   sub=$(mktemp -d)
@@ -79,6 +85,13 @@ new_repo_with_submodule() {
   export SUBMODULE_REPO
   export REPO_WITH_SUBMODULE
   printf '%s\n' "$repo"
+}
+
+setup_repo_with_submodule() {
+  new_repo_with_submodule >/dev/null
+  trap "cleanup_repo '$REPO_WITH_SUBMODULE'; cleanup_repo '$SUBMODULE_REPO'" EXIT
+  REPO="$REPO_WITH_SUBMODULE"
+  export REPO
 }
 
 cleanup_repo() {

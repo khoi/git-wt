@@ -3,9 +3,9 @@ set -euo pipefail
 
 source "$ROOT/tests/lib/common.sh"
 
-repo=$(new_repo)
+setup_repo
+repo="$REPO"
 repo_real=$(cd "$repo" && pwd -P)
-trap 'cleanup_repo "$repo"' EXIT
 
 cd "$repo"
 path=$("$WT_BIN" switch feat-1 --from main)

@@ -3,7 +3,8 @@ set -euo pipefail
 
 source "$ROOT/tests/lib/common.sh"
 
-repo=$(new_repo)
+setup_repo
+repo="$REPO"
 repo_real=$(cd "$repo" && pwd -P)
 base=$(mktemp -d)
 base=$(cd "$base" && pwd -P)
