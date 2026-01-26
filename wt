@@ -68,6 +68,7 @@ Flags:
   --copy-untracked  copy untracked files
   --copy-modified   copy modified files
   -f, --force       overwrite conflicting destination files
+  -n, --dry-run     show files that would be copied
   -h, --help        show help
 USAGE
 }
@@ -335,6 +336,7 @@ copy_files_between() {
   local copymodified="$5"
   local copytracked="$6"
   local force="$7"
+  local dryrun="${8:-0}"
   local files=""
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
   while IFS= read -r file; do
@@ -363,8 +365,12 @@ copy_files_between() {
         fi
       fi
     fi
-    mkdir -p "$(dirname "$dstfile")"
-    cp "$srcfile" "$dstfile" 2>/dev/null || true
+    if [ "$dryrun" -eq 1 ]; then
+      printf '%s\n' "$file"
+    else
+      mkdir -p "$(dirname "$dstfile")"
+      cp "$srcfile" "$dstfile" 2>/dev/null || true
+    fi
   done <<< "$files"
 }
 
@@ -505,7 +511,7 @@ cmd_exec() {
 }
 
 cmd_sync() {
-  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 force=0
+  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 force=0 dryrun=0
   local from_branch="" to_branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -518,6 +524,7 @@ cmd_sync() {
     --copy-untracked) copyuntracked=1 ;;
     --copy-modified) copymodified=1 ;;
     -f | --force) force=1 ;;
+    -n | --dry-run) dryrun=1 ;;
     --)
       shift
       break
@@ -571,7 +578,7 @@ cmd_sync() {
   if [ "$src" = "$dst" ]; then
     die "source and destination are the same"
   fi
-  copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force"
+  copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$dryrun"
 }
 
 cmd_ls() {
@@ -852,7 +859,7 @@ _wt_complete() {
       fi
       ;;
     sync)
-      flags="--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -h --help"
+      flags="--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -n --dry-run -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
     rm)
@@ -945,8 +952,8 @@ _wt() {
   switch_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "initialize submodules in new worktree" "copy all files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
   exec_flags=(--from --path --fetch -h --help --)
   exec_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
-  sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -h --help)
-  sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "overwrite conflicting destination files" "overwrite conflicting destination files" "show help" "show help")
+  sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -n --dry-run -h --help)
+  sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "overwrite conflicting destination files" "overwrite conflicting destination files" "show files that would be copied" "show files that would be copied" "show help" "show help")
   ls_flags=(--plain --json -h --help)
   ls_descs=("tab-delimited output" "JSON output" "show help" "show help")
   rm_flags=(-f --force -h --help)
@@ -1112,6 +1119,7 @@ complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-ignored -d 'copy gi
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-untracked -d 'copy untracked files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-modified -d 'copy modified files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s f -l force -d 'overwrite conflicting destination files'
+complete -c wt -n '__fish_seen_subcommand_from sync' -s n -l dry-run -d 'show files that would be copied'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s h -l help -d 'show help'
 
 complete -c wt -n '__fish_seen_subcommand_from ls' -l plain -d 'tab-delimited output'
