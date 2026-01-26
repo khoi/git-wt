@@ -37,7 +37,7 @@ wt sw feat-1 --from main
 wt switch feat-2 --from main \
   --copy-all
 
-# initialize submodules in the new worktree
+# initialize submodules in the new worktree (new worktrees only)
 
 wt sw feat-sub --from main \
   --init-submodules
