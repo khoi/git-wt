@@ -681,6 +681,9 @@ cmd_rm() {
   local root path
   root=$(main_worktree_path)
   if ! path=$(find_worktree_by_branch "$root" "$branch"); then
+    if [ "$force" -eq 1 ]; then
+      exit 0
+    fi
     die "workspace not found: '$branch'"
   fi
   if [ "$path" = "$root" ]; then
