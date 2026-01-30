@@ -53,6 +53,23 @@ new_repo() {
   printf '%s\n' "$dir"
 }
 
+new_bare_repo_with_worktree() {
+  local src bare wt
+  src=$(new_repo)
+  bare=$(mktemp -d)
+  rm -rf "$bare"
+  git clone --bare "$src" "$bare" >/dev/null
+  wt=$(mktemp -d)
+  git -C "$bare" worktree add "$wt" main >/dev/null
+  BARE_SOURCE_REPO="$src"
+  BARE_REPO="$bare"
+  BARE_WORKTREE="$wt"
+  export BARE_SOURCE_REPO
+  export BARE_REPO
+  export BARE_WORKTREE
+  printf '%s\n' "$bare"
+}
+
 setup_repo() {
   REPO=$(new_repo)
   export REPO
@@ -91,6 +108,13 @@ setup_repo_with_submodule() {
   new_repo_with_submodule >/dev/null
   trap "cleanup_repo '$REPO_WITH_SUBMODULE'; cleanup_repo '$SUBMODULE_REPO'" EXIT
   REPO="$REPO_WITH_SUBMODULE"
+  export REPO
+}
+
+setup_bare_repo_with_worktree() {
+  new_bare_repo_with_worktree >/dev/null
+  trap "cleanup_repo '$BARE_WORKTREE'; cleanup_repo '$BARE_REPO'; cleanup_repo '$BARE_SOURCE_REPO'" EXIT
+  REPO="$BARE_REPO"
   export REPO
 }
 

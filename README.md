@@ -86,6 +86,23 @@ By default worktrees are stored at `<gitroot>/.worktrees`
 
 Override with `--base-dir <dir>` or `GIT_WT_BASE` (flag wins). `wt ls` lists all worktrees unless `--base-dir` is set.
 
+## Bare repositories
+
+wt supports bare repositories and linked worktrees. `wt root` prints the bare repo path and `wt ls` includes a `(bare)` entry. Copy flags and `wt sync` are not supported in bare repositories.
+
+### Quick walkthrough
+
+```
+git init --bare /tmp/my-repo.git
+git -C /tmp/my-repo.git worktree add /tmp/my-repo main
+
+cd /tmp/my-repo.git
+wt root
+wt ls
+```
+
+Expected output includes the bare repo path for `wt root` and a `(bare)` row in `wt ls`.
+
 
 ## Unit Tests
 
