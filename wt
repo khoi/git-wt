@@ -607,12 +607,14 @@ cmd_sync() {
     die "missing source branch"
   fi
   require_repo
-  require_not_bare_for_copy
   if [ "$copyignored" -eq 0 ] && [ "$copyuntracked" -eq 0 ] && [ "$copymodified" -eq 0 ] && [ "$copytracked" -eq 0 ]; then
     die "missing copy flag"
   fi
   local root src dst
   root=$(main_worktree_path)
+  if [ -z "$from_branch" ] && repo_is_bare; then
+    require_not_bare_for_copy
+  fi
   if [ -z "$from_branch" ]; then
     src="$root"
     dst=$(git rev-parse --show-toplevel)
@@ -624,6 +626,9 @@ cmd_sync() {
     if ! dst=$(find_worktree_by_branch "$root" "$to_branch"); then
       die "workspace not found: '$to_branch'"
     fi
+  fi
+  if repo_is_bare && { [ "$src" = "$root" ] || [ "$dst" = "$root" ]; }; then
+    require_not_bare_for_copy
   fi
   if [ "$src" = "$dst" ]; then
     die "source and destination are the same"
