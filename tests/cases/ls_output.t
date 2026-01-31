@@ -17,3 +17,4 @@ assert_match "feat-2" "$out"
 json=$("$WT_BIN" ls --json)
 assert_match "\\[" "$json"
 assert_match "\"branch\"" "$json"
+assert_match "\"is_bare\":false" "$json"

@@ -16,6 +16,7 @@ assert_match '"branch":""' "$out"
 repo_real=$(cd "$repo" && pwd -P)
 assert_match "\"path\":\"$repo_real/.worktrees/detached\"" "$out"
 assert_match "\"head\":\"$commit\"" "$out"
+assert_match "\"is_bare\":false" "$out"
 
 out_plain=$("$WT_BIN" ls --plain)
 assert_match 'detached' "$out_plain"

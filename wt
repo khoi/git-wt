@@ -670,12 +670,12 @@ cmd_ls() {
       local path head branch is_bare
       parse_worktree_entry "$entry"
       if [ "$is_bare" = "1" ]; then
-        filtered+="(bare)\t$path\t$head\n"
+        filtered+="(bare)\t$path\t$head\t1\n"
         continue
       fi
       case "$path" in
       "$base"/*)
-        filtered+="$branch\t$path\t$head\n"
+        filtered+="$branch\t$path\t$head\t0\n"
         ;;
       esac
     done <<<"$entries"
@@ -687,7 +687,7 @@ cmd_ls() {
       if [ "$is_bare" = "1" ]; then
         branch="(bare)"
       fi
-      filtered+="$branch\t$path\t$head\n"
+      filtered+="$branch\t$path\t$head\t$is_bare\n"
     done <<<"$entries"
   fi
   case "$mode" in
@@ -696,16 +696,23 @@ cmd_ls() {
     local first=1
     while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] || continue
-      local branch path head rest
+      local branch path head rest is_bare is_bare_json
       branch=${line%%$'\t'*}
       rest=${line#*$'\t'}
       path=${rest%%$'\t'*}
-      head=${rest#*$'\t'}
+      rest=${rest#*$'\t'}
+      head=${rest%%$'\t'*}
+      is_bare=${rest#*$'\t'}
+      if [ "$is_bare" = "1" ]; then
+        is_bare_json="true"
+      else
+        is_bare_json="false"
+      fi
       if [ "$first" -eq 0 ]; then
         printf ','
       fi
       first=0
-      printf '{"branch":"%s","path":"%s","head":"%s"}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")"
+      printf '{"branch":"%s","path":"%s","head":"%s","is_bare":%s}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")" "$is_bare_json"
     done <<<"$(printf '%b' "$filtered")"
     printf ']\n'
     ;;
