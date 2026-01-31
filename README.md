@@ -2,6 +2,8 @@
 
 Minimal git worktree helper with the main use case for running multiple coding agents in parallel.
 
+The silent engine behind https://supacode.sh
+
 ## Installation
 
 Run:
