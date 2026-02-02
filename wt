@@ -19,6 +19,7 @@ Commands:
   sync [from to]  copy files between worktrees
   ls              list workspaces
   rm <branch>     remove a workspace
+  merge [target]  squash, rebase, and merge to target
   here            print current workspace branch
   base            print base dir
   root            print main worktree path
@@ -91,6 +92,21 @@ wt rm <branch>
 Flags:
   -f, --force     remove even if dirty
   -h, --help      show help
+USAGE
+}
+
+merge_usage() {
+  cat <<'USAGE'
+wt merge [target]
+
+Squash, rebase, and fast-forward merge into target branch.
+Defaults to main worktree's branch.
+
+Flags:
+  --no-squash   preserve individual commits
+  --no-rebase   skip rebase (fail if not rebased)
+  --no-commit   skip committing uncommitted changes
+  -h, --help    show help
 USAGE
 }
 
@@ -801,6 +817,106 @@ cmd_rm() {
   printf '%s\n' "$path"
 }
 
+cmd_merge() {
+  local target="" squash=1 rebase=1 commit=1
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help) merge_usage; exit 0 ;;
+      --no-squash) squash=0 ;;
+      --no-rebase) rebase=0 ;;
+      --no-commit) commit=0 ;;
+      --*) die "unknown flag '$1'" ;;
+      *) if [ -z "$target" ]; then target="$1"; else die "unexpected argument '$1'"; fi ;;
+    esac
+    shift
+  done
+
+  require_repo
+  local root branch
+  root=$(main_worktree_path)
+  branch=$(git symbolic-ref --short HEAD 2>/dev/null) || die "not on a branch (detached HEAD)"
+
+  if [ -z "$target" ]; then
+    local entry
+    while IFS= read -r entry; do
+      local path head branch_name is_bare
+      parse_worktree_entry "$entry"
+      branch_name="$branch"
+      branch=${entry#*$'\t'}
+      branch=${branch#*$'\t'}
+      branch=${branch%%$'\t'*}
+      is_bare=${entry##*$'\t'}
+      if [ "$is_bare" = "1" ]; then
+        continue
+      fi
+      path=${entry%%$'\t'*}
+      if [ -n "$branch" ] && [ "$path" = "$root" ]; then
+        target="$branch"
+        break
+      fi
+    done < <(worktree_entries "$root")
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+    [ -n "$target" ] || die "no target specified and main worktree has no branch"
+  fi
+
+  git show-ref --verify --quiet "refs/heads/$target" || die "target branch '$target' not found"
+
+  [ "$branch" != "$target" ] || die "cannot merge branch into itself"
+
+  if [ "$commit" -eq 0 ]; then
+    if [ -n "$(git status --porcelain)" ]; then
+      die "uncommitted changes present (use without --no-commit)"
+    fi
+  fi
+
+  if [ "$commit" -eq 1 ] && [ -n "$(git status --porcelain)" ]; then
+    git add -A
+    git commit -m "WIP: uncommitted changes" || die "failed to commit changes"
+    printf 'committed uncommitted changes\n' >&2
+  fi
+
+  local merge_base
+  merge_base=$(git merge-base HEAD "$target") || die "no common ancestor with '$target'"
+
+  if [ "$squash" -eq 1 ]; then
+    local commit_count
+    commit_count=$(git rev-list --count "$merge_base..HEAD")
+    if [ "$commit_count" -gt 1 ]; then
+      local subjects
+      subjects=$(git log --format='- %s' "$merge_base..HEAD")
+      git reset --soft "$merge_base" || die "failed to reset to merge base"
+      git commit -m "$(printf 'Squash %d commits\n\n%s' "$commit_count" "$subjects")" || die "failed to create squash commit"
+      printf 'squashed %d commits\n' "$commit_count" >&2
+    elif [ "$commit_count" -eq 1 ]; then
+      printf 'single commit, nothing to squash\n' >&2
+    else
+      printf 'no commits ahead of %s\n' "$target" >&2
+    fi
+  fi
+
+  if [ "$rebase" -eq 1 ]; then
+    if ! git merge-base --is-ancestor "$target" HEAD; then
+      git rebase "$target" || die "rebase failed (resolve conflicts and run: git rebase --continue)"
+      printf 'rebased onto %s\n' "$target" >&2
+    else
+      printf 'already rebased onto %s\n' "$target" >&2
+    fi
+  else
+    if ! git merge-base --is-ancestor "$target" HEAD; then
+      die "not rebased onto '$target' (run without --no-rebase)"
+    fi
+  fi
+
+  if ! git merge-base --is-ancestor "$target" HEAD; then
+    die "cannot fast-forward: '$target' has commits not in HEAD"
+  fi
+
+  local head_sha
+  head_sha=$(git rev-parse HEAD)
+  git update-ref "refs/heads/$target" "$head_sha" || die "failed to fast-forward '$target'"
+  printf 'merged to %s @ %s\n' "$target" "$(git rev-parse --short HEAD)" >&2
+}
+
 cmd_here() {
   require_repo
   local root base current
@@ -846,7 +962,7 @@ cmd_root() {
 
 completion_bash() {
   local commands
-  commands="switch sw exec sync ls rm here base root help completion"
+  commands="switch sw exec sync ls rm merge here base root help completion"
   cat <<EOF
 command -v wt >/dev/null 2>&1 || return 0
 
@@ -958,6 +1074,10 @@ _wt_complete() {
       flags="-f --force -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
+    merge)
+      flags="--no-squash --no-rebase --no-commit -h --help"
+      COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
+      ;;
     ls)
       flags="--plain --json -h --help"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
@@ -967,7 +1087,7 @@ _wt_complete() {
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     help)
-      flags="switch sw exec sync ls rm here base root help completion"
+      flags="switch sw exec sync ls rm merge here base root help completion"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     completion)
@@ -1023,8 +1143,8 @@ __wt_branches() {
 }
 
 _wt() {
-  local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs sync_flags sync_descs ls_flags ls_descs rm_flags rm_descs hb_flags hb_descs global_flags global_descs
-  subcmds=(switch sw exec sync ls rm here base root help completion)
+  local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs sync_flags sync_descs ls_flags ls_descs rm_flags rm_descs merge_flags merge_descs hb_flags hb_descs global_flags global_descs
+  subcmds=(switch sw exec sync ls rm merge here base root help completion)
   subdescs=(
     "create or open a workspace"
     "alias for switch"
@@ -1032,6 +1152,7 @@ _wt() {
     "copy files between worktrees"
     "list workspaces"
     "remove a workspace"
+    "squash, rebase, and merge to target"
     "print current workspace branch"
     "print base dir"
     "print main worktree path"
@@ -1050,6 +1171,8 @@ _wt() {
   ls_descs=("tab-delimited output" "JSON output" "show help" "show help")
   rm_flags=(-f --force -h --help)
   rm_descs=("remove even if dirty" "remove even if dirty" "show help" "show help")
+  merge_flags=(--no-squash --no-rebase --no-commit -h --help)
+  merge_descs=("preserve individual commits" "skip rebase (fail if not rebased)" "skip committing uncommitted changes" "show help" "show help")
   hb_flags=(-h --help)
   hb_descs=("show help" "show help")
   if (( CURRENT == 2 )); then
@@ -1115,6 +1238,11 @@ _wt() {
       ;;
     rm)
       compadd -d rm_descs -- \$rm_flags
+      compadd -- \${(f)"\$(__wt_branches)"}
+      return 0
+      ;;
+    merge)
+      compadd -d merge_descs -- \$merge_flags
       compadd -- \${(f)"\$(__wt_branches)"}
       return 0
       ;;
@@ -1190,12 +1318,13 @@ complete -c wt -n '__fish_use_subcommand' -a exec -d 'open a workspace and run a
 complete -c wt -n '__fish_use_subcommand' -a sync -d 'copy files between worktrees'
 complete -c wt -n '__fish_use_subcommand' -a ls -d 'list workspaces'
 complete -c wt -n '__fish_use_subcommand' -a rm -d 'remove a workspace'
+complete -c wt -n '__fish_use_subcommand' -a merge -d 'squash, rebase, and merge to target'
 complete -c wt -n '__fish_use_subcommand' -a here -d 'print current workspace branch'
 complete -c wt -n '__fish_use_subcommand' -a base -d 'print base dir'
 complete -c wt -n '__fish_use_subcommand' -a root -d 'print main worktree path'
 complete -c wt -n '__fish_use_subcommand' -a help -d 'show help'
 complete -c wt -n '__fish_use_subcommand' -a completion -d 'print shell completion'
-complete -c wt -n '__fish_seen_subcommand_from switch sw exec sync rm' -a '(__wt_branches)'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec sync rm merge' -a '(__wt_branches)'
 
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l from -r -d 'base ref for new branch'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l path -r -d 'explicit worktree path'
@@ -1221,12 +1350,18 @@ complete -c wt -n '__fish_seen_subcommand_from ls' -s h -l help -d 'show help'
 complete -c wt -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even if dirty'
 complete -c wt -n '__fish_seen_subcommand_from rm' -s h -l help -d 'show help'
 
+complete -c wt -n '__fish_seen_subcommand_from merge' -l no-squash -d 'preserve individual commits'
+complete -c wt -n '__fish_seen_subcommand_from merge' -l no-rebase -d 'skip rebase (fail if not rebased)'
+complete -c wt -n '__fish_seen_subcommand_from merge' -l no-commit -d 'skip committing uncommitted changes'
+complete -c wt -n '__fish_seen_subcommand_from merge' -s h -l help -d 'show help'
+
 complete -c wt -n '__fish_seen_subcommand_from help' -a switch -d 'create or open a workspace'
 complete -c wt -n '__fish_seen_subcommand_from help' -a sw -d 'alias for switch'
 complete -c wt -n '__fish_seen_subcommand_from help' -a exec -d 'open a workspace and run a command'
 complete -c wt -n '__fish_seen_subcommand_from help' -a sync -d 'copy files between worktrees'
 complete -c wt -n '__fish_seen_subcommand_from help' -a ls -d 'list workspaces'
 complete -c wt -n '__fish_seen_subcommand_from help' -a rm -d 'remove a workspace'
+complete -c wt -n '__fish_seen_subcommand_from help' -a merge -d 'squash, rebase, and merge to target'
 complete -c wt -n '__fish_seen_subcommand_from help' -a here -d 'print current workspace branch'
 complete -c wt -n '__fish_seen_subcommand_from help' -a base -d 'print base dir'
 complete -c wt -n '__fish_seen_subcommand_from help' -a root -d 'print main worktree path'
@@ -1260,6 +1395,7 @@ cmd_help() {
   sync) sync_usage ;;
   ls) ls_usage ;;
   rm) rm_usage ;;
+  merge) merge_usage ;;
   here) here_usage ;;
   base) base_usage ;;
   root) root_usage ;;
@@ -1324,6 +1460,10 @@ ls)
 rm)
   shift
   cmd_rm "$@"
+  ;;
+merge)
+  shift
+  cmd_merge "$@"
   ;;
 here)
   shift
