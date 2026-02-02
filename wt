@@ -154,12 +154,12 @@ common_git_dir_abs() {
 }
 
 repo_is_bare() {
-  local common="${1:-}"
-  if [ -z "$common" ]; then
-    common=$(common_git_dir_abs)
-  fi
   local is_bare
-  is_bare=$(git --git-dir "$common" rev-parse --is-bare-repository)
+  if [ -n "${1:-}" ]; then
+    is_bare=$(git --git-dir "$1" rev-parse --is-bare-repository)
+  else
+    is_bare=$(git rev-parse --is-bare-repository)
+  fi
   [ "$is_bare" = "true" ]
 }
 
@@ -172,16 +172,30 @@ require_not_bare_for_copy() {
 main_worktree_path() {
   local common
   common=$(common_git_dir_abs)
-  if repo_is_bare "$common"; then
+  if repo_is_bare; then
     printf '%s\n' "$common"
     return
   fi
-  while read -r key value; do
-    if [ "$key" = "worktree" ]; then
-      printf '%s\n' "$value"
-      return
+  local path="" is_bare=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ -z "$line" ]; then
+      if [ -n "$path" ] && [ "$is_bare" -eq 0 ]; then
+        printf '%s\n' "$path"
+        return
+      fi
+      path=""
+      is_bare=0
+      continue
     fi
+    case "$line" in
+    worktree\ *) path="${line#worktree }" ;;
+    bare) is_bare=1 ;;
+    esac
   done < <(git worktree list --porcelain)
+  if [ -n "$path" ] && [ "$is_bare" -eq 0 ]; then
+    printf '%s\n' "$path"
+    return
+  fi
   git rev-parse --show-toplevel
 }
 
@@ -821,6 +835,12 @@ cmd_base() {
 
 cmd_root() {
   require_repo
+  local common
+  common=$(common_git_dir_abs)
+  if repo_is_bare "$common"; then
+    printf '%s\n' "$common"
+    return
+  fi
   main_worktree_path
 }
 
