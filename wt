@@ -327,6 +327,10 @@ find_worktree_by_path() {
       printf '%s\n' "$path"
       return 0
     fi
+    if [ -d "$path" ] && [ -d "$target" ] && [ "$path" -ef "$target" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
   done < <(worktree_entries "$root")
   return 1
 }
