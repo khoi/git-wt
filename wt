@@ -19,7 +19,7 @@ Commands:
   sync [from to]  copy files between worktrees
   ls              list workspaces
   rm <branch>     remove a workspace
-  merge [target]  squash, rebase, and merge to target
+  merge <target>  squash, rebase, and merge to target
   here            print current workspace branch
   base            print base dir
   root            print main worktree path
@@ -97,10 +97,9 @@ USAGE
 
 merge_usage() {
   cat <<'USAGE'
-wt merge [target]
+wt merge <target>
 
 Squash, rebase, and fast-forward merge into target branch.
-Defaults to main worktree's branch.
 
 Flags:
   --no-squash   preserve individual commits
@@ -831,33 +830,15 @@ cmd_merge() {
     shift
   done
 
+  if [ -z "$target" ]; then
+    merge_usage
+    exit 1
+  fi
+
   require_repo
   local root branch
   root=$(main_worktree_path)
   branch=$(git symbolic-ref --short HEAD 2>/dev/null) || die "not on a branch (detached HEAD)"
-
-  if [ -z "$target" ]; then
-    local entry
-    while IFS= read -r entry; do
-      local path head branch_name is_bare
-      parse_worktree_entry "$entry"
-      branch_name="$branch"
-      branch=${entry#*$'\t'}
-      branch=${branch#*$'\t'}
-      branch=${branch%%$'\t'*}
-      is_bare=${entry##*$'\t'}
-      if [ "$is_bare" = "1" ]; then
-        continue
-      fi
-      path=${entry%%$'\t'*}
-      if [ -n "$branch" ] && [ "$path" = "$root" ]; then
-        target="$branch"
-        break
-      fi
-    done < <(worktree_entries "$root")
-    branch=$(git symbolic-ref --short HEAD 2>/dev/null)
-    [ -n "$target" ] || die "no target specified and main worktree has no branch"
-  fi
 
   git show-ref --verify --quiet "refs/heads/$target" || die "target branch '$target' not found"
 

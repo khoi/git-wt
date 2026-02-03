@@ -7,11 +7,7 @@ cd "$REPO"
 
 "$WT_BIN" switch feat --from main >/dev/null
 cd "$REPO/.worktrees/feat"
-echo "change" >> README.md
-git add -A && git commit -m "feat: change" >/dev/null
 
-"$WT_BIN" merge
-
-cd "$REPO"
-log_out=$(git log main --oneline)
-echo "$log_out" | grep -q "feat: change" || fail "main should have feat commit"
+run_cmd "$WT_BIN" merge
+assert_ne "$RUN_RC" "0"
+assert_match "wt merge" "$RUN_OUT"
