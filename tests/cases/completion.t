@@ -39,7 +39,7 @@ assert_match "base dir override" "$out"
 assert_match "tab-delimited output" "$out"
 assert_match "base-dir" "$out"
 assert_match "function wt" "$out"
-assert_match "command wt" "$out"
+assert_match 'command "$__wt_bin"' "$out"
 assert_match 'cd "\$path"' "$out"
 
 completion_bash=$("$WT_BIN" completion bash)

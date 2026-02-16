@@ -1406,18 +1406,27 @@ EOF
 }
 
 completion_fish() {
+  local wt_bin="$0"
+  case "$wt_bin" in
+  */*) wt_bin="$(cd "$(dirname "$wt_bin")" && pwd -P)/$(basename "$wt_bin")" ;;
+  *) wt_bin="$(command -v "$wt_bin" 2>/dev/null || printf '%s' "$wt_bin")" ;;
+  esac
+  local wt_bin_escaped="${wt_bin//\'/\'\\\'\'}"
   cat <<'EOF'
 type -q wt; or return
 
+EOF
+  printf "set -g __wt_bin '%s'\n\n" "$wt_bin_escaped"
+  cat <<'EOF'
 function wt
   if test "$argv[1]" = "switch" -o "$argv[1]" = "sw"
     if contains -- -h $argv; or contains -- --help $argv
-      command wt $argv
+      command "$__wt_bin" $argv
       return $status
     end
     set -g __wt_rc 0
     set -l out (begin
-      command wt $argv
+      command "$__wt_bin" $argv
       set -g __wt_rc $status
     end | string collect | string trim --right)
     set -l rc $__wt_rc
@@ -1434,7 +1443,7 @@ function wt
       return $rc
     end
   else
-    command wt $argv
+    command "$__wt_bin" $argv
   end
 end
 
