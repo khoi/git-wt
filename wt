@@ -440,6 +440,29 @@ collect_copy_files() {
   local copyuntracked="$3"
   local copymodified="$4"
   local copytracked="$5"
+  local sources=0
+  [ "$copyignored" -eq 1 ] && sources=$((sources + 1))
+  [ "$copyuntracked" -eq 1 ] && sources=$((sources + 1))
+  [ "$copymodified" -eq 1 ] && sources=$((sources + 1))
+  [ "$copytracked" -eq 1 ] && sources=$((sources + 1))
+  local prefixes
+  prefixes=$(list_nested_worktree_prefixes "$src")
+  if [ "$sources" -eq 1 ]; then
+    if [ "$copyignored" -eq 1 ]; then
+      filter_nested_worktree_prefixes "$(list_ignored_files "$src")" "$prefixes"
+      return
+    fi
+    if [ "$copyuntracked" -eq 1 ]; then
+      filter_nested_worktree_prefixes "$(list_untracked_files "$src")" "$prefixes"
+      return
+    fi
+    if [ "$copymodified" -eq 1 ]; then
+      filter_nested_worktree_prefixes "$(list_modified_files "$src")" "$prefixes"
+      return
+    fi
+    filter_nested_worktree_prefixes "$(list_tracked_files "$src")" "$prefixes"
+    return
+  fi
   local files=""
   if [ "$copyignored" -eq 1 ]; then
     files+=$(list_ignored_files "$src")$'\n'
@@ -453,9 +476,8 @@ collect_copy_files() {
   if [ "$copytracked" -eq 1 ]; then
     files+=$(list_tracked_files "$src")$'\n'
   fi
-  local deduped prefixes
+  local deduped
   deduped=$(printf '%s' "$files" | sed '/^$/d' | LC_ALL=C sort -u)
-  prefixes=$(list_nested_worktree_prefixes "$src")
   filter_nested_worktree_prefixes "$deduped" "$prefixes"
 }
 
@@ -472,6 +494,20 @@ reflink_copy_file() {
   esac
 }
 
+reflink_copy_tree() {
+  local src="$1"
+  local dst="$2"
+  mkdir -p "$dst"
+  case "$(uname)" in
+  Darwin)
+    cp -cRP "$src/." "$dst" 2>/dev/null || cp -RP "$src/." "$dst" 2>/dev/null || true
+    ;;
+  *)
+    cp -a --reflink=auto "$src/." "$dst" 2>/dev/null || cp -a "$src/." "$dst" 2>/dev/null || true
+    ;;
+  esac
+}
+
 copy_symlink() {
   local src="$1"
   local dst="$2"
@@ -484,27 +520,7 @@ copy_symlink() {
 copy_tree() {
   local src_dir="$1"
   local dst_dir="$2"
-  if [ "$src_dir" != "/" ]; then
-    src_dir="${src_dir%/}"
-  fi
-  if [ "$dst_dir" != "/" ]; then
-    dst_dir="${dst_dir%/}"
-  fi
-  mkdir -p "$dst_dir"
-  local path rel dst_path
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    rel="${path#"$src_dir"/}"
-    dst_path="$dst_dir/$rel"
-    if [ -L "$path" ]; then
-      copy_symlink "$path" "$dst_path"
-    elif [ -d "$path" ]; then
-      mkdir -p "$dst_path"
-    elif [ -f "$path" ]; then
-      mkdir -p "$(dirname "$dst_path")"
-      reflink_copy_file "$path" "$dst_path"
-    fi
-  done < <(find "$src_dir" -mindepth 1)
+  reflink_copy_tree "$src_dir" "$dst_dir"
 }
 
 copy_path() {
@@ -559,6 +575,10 @@ copy_files_between() {
   local files=""
   local total=0 index=0
   if [ "$src" = "$dst" ] || { [ -d "$src" ] && [ -d "$dst" ] && [ "$src" -ef "$dst" ]; }; then
+    return 0
+  fi
+  if [ "$dryrun" -eq 1 ] && [ "$verbose" -eq 0 ]; then
+    collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
     return 0
   fi
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
