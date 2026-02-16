@@ -22,8 +22,7 @@ assert_rc 1
 assert_match "unexpected argument" "$RUN_ERR"
 
 run_cmd "$WT_BIN" sync feat-a feat-a --copy-modified
-assert_rc 1
-assert_match "source and destination are the same" "$RUN_ERR"
+assert_rc 0
 
 "$WT_BIN" sync feat-a feat-b --copy-modified
 assert_match "change" "$(cat "$path_b/README.md")"

@@ -61,7 +61,7 @@ sync_usage() {
   cat <<'USAGE'
 wt sync [<from-branch> <to-branch>]
 
-Defaults to main worktree -> current worktree.
+Defaults to primary worktree -> current worktree.
 
 Flags:
   --copy-all        copy all files
@@ -177,12 +177,6 @@ repo_is_bare() {
   [ "$is_bare" = "true" ]
 }
 
-require_not_bare_for_copy() {
-  if repo_is_bare; then
-    die "copy flags are not supported in bare repositories"
-  fi
-}
-
 main_worktree_path() {
   local common
   common=$(common_git_dir_abs)
@@ -211,6 +205,30 @@ main_worktree_path() {
     return
   fi
   git rev-parse --show-toplevel
+}
+
+primary_worktree_path() {
+  local root="$1"
+  local entry
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    local path head branch is_bare
+    parse_worktree_entry "$entry"
+    if [ "$is_bare" = "0" ] && [ -d "$path" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done < <(worktree_entries "$root")
+  return 1
+}
+
+copy_source_path() {
+  local root="$1"
+  if repo_is_bare; then
+    primary_worktree_path "$root" || die "no linked worktree found for copy operations"
+    return
+  fi
+  printf '%s\n' "$root"
 }
 
 abs_path() {
@@ -340,7 +358,7 @@ json_escape() {
 
 list_ignored_files() {
   local root="$1"
-  git -C "$root" ls-files --others --ignored --exclude-standard | sed '/^\.git\//d'
+  git -C "$root" ls-files --others --ignored --exclude-standard --directory | sed '/^\.git\//d'
 }
 
 list_untracked_files() {
@@ -356,6 +374,62 @@ list_modified_files() {
 list_tracked_files() {
   local root="$1"
   git -C "$root" ls-files | sed '/^\.git\//d'
+}
+
+list_nested_worktree_prefixes() {
+  local src="$1"
+  local src_real
+  src_real=$(cd "$src" && pwd -P)
+  local entry
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    local path head branch is_bare
+    parse_worktree_entry "$entry"
+    [ "$is_bare" = "0" ] || continue
+    [ -d "$path" ] || continue
+    local path_real
+    path_real=$(cd "$path" && pwd -P)
+    if [ "$path_real" = "$src_real" ]; then
+      continue
+    fi
+    case "$path_real" in
+    "$src_real"/*) printf '%s\n' "${path_real#"$src_real"/}" ;;
+    esac
+  done < <(worktree_entries "$src")
+}
+
+filter_nested_worktree_prefixes() {
+  local files="$1"
+  local prefixes="$2"
+  if [ -z "$prefixes" ]; then
+    printf '%s' "$files"
+    return
+  fi
+  local out="" file prefix skip file_trim prefix_trim
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    file_trim="${file%/}"
+    skip=0
+    while IFS= read -r prefix; do
+      [ -n "$prefix" ] || continue
+      prefix_trim="${prefix%/}"
+      case "$file_trim" in
+      "$prefix_trim" | "$prefix_trim"/*)
+        skip=1
+        break
+        ;;
+      esac
+      case "$prefix_trim" in
+      "$file_trim" | "$file_trim"/*)
+        skip=1
+        break
+        ;;
+      esac
+    done <<< "$prefixes"
+    [ "$skip" -eq 1 ] && continue
+    out+="$file"$'\n'
+  done <<< "$files"
+  printf '%s' "$out"
 }
 
 collect_copy_files() {
@@ -377,10 +451,13 @@ collect_copy_files() {
   if [ "$copytracked" -eq 1 ]; then
     files+=$(list_tracked_files "$src")$'\n'
   fi
-  printf '%s' "$files" | sed '/^$/d' | LC_ALL=C sort -u
+  local deduped prefixes
+  deduped=$(printf '%s' "$files" | sed '/^$/d' | LC_ALL=C sort -u)
+  prefixes=$(list_nested_worktree_prefixes "$src")
+  filter_nested_worktree_prefixes "$deduped" "$prefixes"
 }
 
-copy_file() {
+reflink_copy_file() {
   local src="$1"
   local dst="$2"
   case "$(uname)" in
@@ -391,6 +468,54 @@ copy_file() {
     cp --reflink=auto "$src" "$dst" 2>/dev/null || cp "$src" "$dst" 2>/dev/null || true
     ;;
   esac
+}
+
+copy_symlink() {
+  local src="$1"
+  local dst="$2"
+  local target
+  target=$(readlink "$src" 2>/dev/null) || return 0
+  mkdir -p "$(dirname "$dst")"
+  ln -sfn "$target" "$dst" 2>/dev/null || true
+}
+
+copy_tree() {
+  local src_dir="$1"
+  local dst_dir="$2"
+  if [ "$src_dir" != "/" ]; then
+    src_dir="${src_dir%/}"
+  fi
+  if [ "$dst_dir" != "/" ]; then
+    dst_dir="${dst_dir%/}"
+  fi
+  mkdir -p "$dst_dir"
+  local path rel dst_path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rel="${path#"$src_dir"/}"
+    dst_path="$dst_dir/$rel"
+    if [ -L "$path" ]; then
+      copy_symlink "$path" "$dst_path"
+    elif [ -d "$path" ]; then
+      mkdir -p "$dst_path"
+    elif [ -f "$path" ]; then
+      mkdir -p "$(dirname "$dst_path")"
+      reflink_copy_file "$path" "$dst_path"
+    fi
+  done < <(find "$src_dir" -mindepth 1)
+}
+
+copy_path() {
+  local src="$1"
+  local dst="$2"
+  if [ -L "$src" ]; then
+    copy_symlink "$src" "$dst"
+  elif [ -d "$src" ]; then
+    copy_tree "$src" "$dst"
+  elif [ -f "$src" ]; then
+    mkdir -p "$(dirname "$dst")"
+    reflink_copy_file "$src" "$dst"
+  fi
 }
 
 copy_files_to_worktree() {
@@ -406,9 +531,10 @@ copy_files_to_worktree() {
     [ -z "$file" ] && continue
     local srcfile="$src/$file"
     local dstfile="$dst/$file"
-    [ -f "$srcfile" ] || continue
-    mkdir -p "$(dirname "$dstfile")"
-    copy_file "$srcfile" "$dstfile"
+    if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
+      continue
+    fi
+    copy_path "$srcfile" "$dstfile"
   done <<< "$files"
 }
 
@@ -421,17 +547,21 @@ copy_files_between() {
   local copytracked="$6"
   local dryrun="${7:-0}"
   local files=""
+  if [ "$src" = "$dst" ] || { [ -d "$src" ] && [ -d "$dst" ] && [ "$src" -ef "$dst" ]; }; then
+    return 0
+  fi
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     local srcfile="$src/$file"
     local dstfile="$dst/$file"
-    [ -f "$srcfile" ] || continue
+    if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
+      continue
+    fi
     if [ "$dryrun" -eq 1 ]; then
       printf '%s\n' "$file"
     else
-      mkdir -p "$(dirname "$dstfile")"
-      copy_file "$srcfile" "$dstfile"
+      copy_path "$srcfile" "$dstfile"
     fi
   done <<< "$files"
 }
@@ -448,11 +578,12 @@ open_path() {
   local copymodified="${9:-0}"
   local copytracked="${10:-0}"
   require_repo
-  if [ "$copyignored" -eq 1 ] || [ "$copyuntracked" -eq 1 ] || [ "$copymodified" -eq 1 ] || [ "$copytracked" -eq 1 ]; then
-    require_not_bare_for_copy
-  fi
-  local root base path
+  local root base path copy_src
   root=$(main_worktree_path)
+  copy_src="$root"
+  if [ "$copyignored" -eq 1 ] || [ "$copyuntracked" -eq 1 ] || [ "$copymodified" -eq 1 ] || [ "$copytracked" -eq 1 ]; then
+    copy_src=$(copy_source_path "$root")
+  fi
   base=$(base_dir "$root" "$base_override")
   if [ -n "$path_override" ]; then
     path=$(resolve_path "$root" "$path_override")
@@ -473,7 +604,7 @@ open_path() {
     fi
     mkdir -p "$(dirname "$path")"
     git -C "$root" worktree add "$path" "$branch" >/dev/null
-    copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
+    copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
     if [ "$initsubmodules" -eq 1 ]; then
       git -C "$path" submodule update --init --recursive 1>&2
     fi
@@ -491,7 +622,7 @@ open_path() {
   fi
   mkdir -p "$(dirname "$path")"
   git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null
-  copy_files_to_worktree "$root" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
+  copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
   if [ "$initsubmodules" -eq 1 ]; then
     git -C "$path" submodule update --init --recursive 1>&2
   fi
@@ -627,13 +758,13 @@ cmd_sync() {
   fi
   local root src dst
   root=$(main_worktree_path)
-  if [ -z "$from_branch" ] && repo_is_bare; then
-    require_not_bare_for_copy
-  fi
   if [ -z "$from_branch" ]; then
-    src="$root"
-    dst=$(git rev-parse --show-toplevel)
-    find_worktree_by_path "$root" "$dst" >/dev/null || die "current directory is not a worktree"
+    src=$(copy_source_path "$root")
+    if dst=$(git rev-parse --show-toplevel 2>/dev/null); then
+      find_worktree_by_path "$root" "$dst" >/dev/null || die "current directory is not a worktree"
+    else
+      dst="$src"
+    fi
   else
     if ! src=$(find_worktree_by_branch "$root" "$from_branch"); then
       die "workspace not found: '$from_branch'"
@@ -641,12 +772,6 @@ cmd_sync() {
     if ! dst=$(find_worktree_by_branch "$root" "$to_branch"); then
       die "workspace not found: '$to_branch'"
     fi
-  fi
-  if repo_is_bare && { [ "$src" = "$root" ] || [ "$dst" = "$root" ]; }; then
-    require_not_bare_for_copy
-  fi
-  if [ "$src" = "$dst" ]; then
-    die "source and destination are the same"
   fi
   copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$dryrun"
 }
@@ -1034,7 +1159,7 @@ _wt_complete() {
       fi
       ;;
     sync)
-      flags="--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -n --dry-run -h --help"
+      flags="--copy-all --copy-ignored --copy-untracked --copy-modified -n --dry-run -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
     rm)
@@ -1132,8 +1257,8 @@ _wt() {
   switch_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "initialize submodules in new worktree" "copy all files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
   exec_flags=(--from --path --fetch -h --help --)
   exec_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
-  sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -n --dry-run -h --help)
-  sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "overwrite conflicting destination files" "overwrite conflicting destination files" "show files that would be copied" "show files that would be copied" "show help" "show help")
+  sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -n --dry-run -h --help)
+  sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "show files that would be copied" "show files that would be copied" "show help" "show help")
   ls_flags=(--plain --json -h --help)
   ls_descs=("tab-delimited output" "JSON output" "show help" "show help")
   rm_flags=(-f --force -h --help)
@@ -1306,7 +1431,6 @@ complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-all -d 'copy all fi
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-ignored -d 'copy gitignored files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-untracked -d 'copy untracked files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-modified -d 'copy modified files'
-complete -c wt -n '__fish_seen_subcommand_from sync' -s f -l force -d 'overwrite conflicting destination files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s n -l dry-run -d 'show files that would be copied'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s h -l help -d 'show help'
 

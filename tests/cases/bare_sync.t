@@ -8,5 +8,4 @@ repo="$REPO"
 
 cd "$repo"
 run_cmd "$WT_BIN" sync --copy-all
-assert_rc 1
-assert_match "copy flags are not supported in bare repositories" "$RUN_ERR"
+assert_rc 0
