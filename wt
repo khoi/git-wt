@@ -41,6 +41,7 @@ Flags:
   --copy-ignored    copy gitignored files to new worktree
   --copy-untracked  copy untracked files to new worktree
   --copy-modified   copy modified files to new worktree
+  -v, --verbose     print copy progress
   -h, --help        show help
 USAGE
 }
@@ -68,6 +69,7 @@ Flags:
   --copy-ignored    copy gitignored files
   --copy-untracked  copy untracked files
   --copy-modified   copy modified files
+  -v, --verbose     print copy progress
   -n, --dry-run     show files that would be copied
   -h, --help        show help
 USAGE
@@ -525,14 +527,21 @@ copy_files_to_worktree() {
   local copyuntracked="$4"
   local copymodified="$5"
   local copytracked="$6"
+  local verbose="${7:-0}"
   local files=""
+  local total=0 index=0
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
+  total=$(printf '%s\n' "$files" | sed '/^$/d' | awk 'END { print NR+0 }')
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     local srcfile="$src/$file"
     local dstfile="$dst/$file"
     if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
       continue
+    fi
+    index=$((index + 1))
+    if [ "$verbose" -eq 1 ]; then
+      printf '[%s/%s] copy %s\n' "$index" "$total" "$file" >&2
     fi
     copy_path "$srcfile" "$dstfile"
   done <<< "$files"
@@ -546,17 +555,28 @@ copy_files_between() {
   local copymodified="$5"
   local copytracked="$6"
   local dryrun="${7:-0}"
+  local verbose="${8:-0}"
   local files=""
+  local total=0 index=0
   if [ "$src" = "$dst" ] || { [ -d "$src" ] && [ -d "$dst" ] && [ "$src" -ef "$dst" ]; }; then
     return 0
   fi
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
+  total=$(printf '%s\n' "$files" | sed '/^$/d' | awk 'END { print NR+0 }')
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     local srcfile="$src/$file"
     local dstfile="$dst/$file"
     if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
       continue
+    fi
+    index=$((index + 1))
+    if [ "$verbose" -eq 1 ]; then
+      if [ "$dryrun" -eq 1 ]; then
+        printf '[%s/%s] would copy %s\n' "$index" "$total" "$file" >&2
+      else
+        printf '[%s/%s] copy %s\n' "$index" "$total" "$file" >&2
+      fi
     fi
     if [ "$dryrun" -eq 1 ]; then
       printf '%s\n' "$file"
@@ -577,6 +597,7 @@ open_path() {
   local copyuntracked="${8:-0}"
   local copymodified="${9:-0}"
   local copytracked="${10:-0}"
+  local verbose="${11:-0}"
   require_repo
   local root base path copy_src
   root=$(main_worktree_path)
@@ -604,7 +625,7 @@ open_path() {
     fi
     mkdir -p "$(dirname "$path")"
     git -C "$root" worktree add "$path" "$branch" >/dev/null
-    copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
+    copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$verbose"
     if [ "$initsubmodules" -eq 1 ]; then
       git -C "$path" submodule update --init --recursive 1>&2
     fi
@@ -622,7 +643,7 @@ open_path() {
   fi
   mkdir -p "$(dirname "$path")"
   git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null
-  copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
+  copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$verbose"
   if [ "$initsubmodules" -eq 1 ]; then
     git -C "$path" submodule update --init --recursive 1>&2
   fi
@@ -631,7 +652,7 @@ open_path() {
 
 cmd_switch() {
   local from="" path_override="" fetch=0 branch=""
-  local initsubmodules=0 copyignored=0 copyuntracked=0 copymodified=0 copytracked=0
+  local initsubmodules=0 copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 verbose=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
     -h | --help)
@@ -656,13 +677,14 @@ cmd_switch() {
     --copy-ignored) copyignored=1 ;;
     --copy-untracked) copyuntracked=1 ;;
     --copy-modified) copymodified=1 ;;
+    -v | --verbose) verbose=1 ;;
     --*) die "unknown flag '$1'" ;;
     *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
     esac
     shift
   done
   [ -n "$branch" ] || die "missing branch"
-  open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$initsubmodules" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
+  open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$initsubmodules" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$verbose"
 }
 
 cmd_exec() {
@@ -707,7 +729,7 @@ cmd_exec() {
 }
 
 cmd_sync() {
-  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 dryrun=0
+  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 dryrun=0 verbose=0
   local from_branch="" to_branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -719,6 +741,7 @@ cmd_sync() {
     --copy-ignored) copyignored=1 ;;
     --copy-untracked) copyuntracked=1 ;;
     --copy-modified) copymodified=1 ;;
+    -v | --verbose) verbose=1 ;;
     -n | --dry-run) dryrun=1 ;;
     --)
       shift
@@ -773,7 +796,7 @@ cmd_sync() {
       die "workspace not found: '$to_branch'"
     fi
   fi
-  copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$dryrun"
+  copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$dryrun" "$verbose"
 }
 
 cmd_ls() {
@@ -1141,7 +1164,7 @@ _wt_complete() {
   fi
   case "\$cmd" in
     switch|sw)
-      flags="--from --path --fetch --init-submodules --copy-all --copy-ignored --copy-untracked --copy-modified -h --help"
+      flags="--from --path --fetch --init-submodules --copy-all --copy-ignored --copy-untracked --copy-modified -v --verbose -h --help"
       case "\$prev" in
         --from|--path) return 0 ;;
       esac
@@ -1159,7 +1182,7 @@ _wt_complete() {
       fi
       ;;
     sync)
-      flags="--copy-all --copy-ignored --copy-untracked --copy-modified -n --dry-run -h --help"
+      flags="--copy-all --copy-ignored --copy-untracked --copy-modified -v --verbose -n --dry-run -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
     rm)
@@ -1253,12 +1276,12 @@ _wt() {
   )
   global_flags=(--base-dir -h --help)
   global_descs=("base dir override" "show help" "show help")
-  switch_flags=(--from --path --fetch --init-submodules --copy-all --copy-ignored --copy-untracked --copy-modified -h --help)
-  switch_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "initialize submodules in new worktree" "copy all files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "show help" "show help")
+  switch_flags=(--from --path --fetch --init-submodules --copy-all --copy-ignored --copy-untracked --copy-modified -v --verbose -h --help)
+  switch_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "initialize submodules in new worktree" "copy all files to new worktree" "copy gitignored files to new worktree" "copy untracked files to new worktree" "copy modified files to new worktree" "print copy progress" "print copy progress" "show help" "show help")
   exec_flags=(--from --path --fetch -h --help --)
   exec_descs=("base ref for new branch" "explicit worktree path" "fetch remotes before resolving --from" "show help" "show help" "end of flags")
-  sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -n --dry-run -h --help)
-  sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "show files that would be copied" "show files that would be copied" "show help" "show help")
+  sync_flags=(--copy-all --copy-ignored --copy-untracked --copy-modified -v --verbose -n --dry-run -h --help)
+  sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "print copy progress" "print copy progress" "show files that would be copied" "show files that would be copied" "show help" "show help")
   ls_flags=(--plain --json -h --help)
   ls_descs=("tab-delimited output" "JSON output" "show help" "show help")
   rm_flags=(-f --force -h --help)
@@ -1427,10 +1450,12 @@ complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-all -d 'copy a
 complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-ignored -d 'copy gitignored files to new worktree'
 complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-untracked -d 'copy untracked files to new worktree'
 complete -c wt -n '__fish_seen_subcommand_from switch sw' -l copy-modified -d 'copy modified files to new worktree'
+complete -c wt -n '__fish_seen_subcommand_from switch sw' -s v -l verbose -d 'print copy progress'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-all -d 'copy all files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-ignored -d 'copy gitignored files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-untracked -d 'copy untracked files'
 complete -c wt -n '__fish_seen_subcommand_from sync' -l copy-modified -d 'copy modified files'
+complete -c wt -n '__fish_seen_subcommand_from sync' -s v -l verbose -d 'print copy progress'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s n -l dry-run -d 'show files that would be copied'
 complete -c wt -n '__fish_seen_subcommand_from sync' -s h -l help -d 'show help'
 
