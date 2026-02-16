@@ -68,7 +68,7 @@ Flags:
   --copy-ignored    copy gitignored files
   --copy-untracked  copy untracked files
   --copy-modified   copy modified files
-  -f, --force       overwrite conflicting destination files
+  -f, --force       overwrite destination files (default behavior)
   -n, --dry-run     show files that would be copied
   -h, --help        show help
 USAGE
@@ -381,15 +381,6 @@ collect_copy_files() {
   printf '%s' "$files" | sed '/^$/d' | LC_ALL=C sort -u
 }
 
-list_contains() {
-  local haystack="$1"
-  local needle="$2"
-  case "$haystack" in
-  *$'\n'"$needle"$'\n'*) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
 copy_file() {
   local src="$1"
   local dst="$2"
@@ -432,39 +423,12 @@ copy_files_between() {
   local force="$7"
   local dryrun="${8:-0}"
   local files=""
-  local tracked_list dirty_list
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
-  tracked_list=$'\n'"$(git -C "$dst" ls-files)"$'\n'
-  dirty_list=$'\n'"$(
-    {
-      git -C "$dst" diff --name-only HEAD 2>/dev/null || true
-      git -C "$dst" diff --cached --name-only 2>/dev/null || true
-    } | LC_ALL=C sort -u
-  )"$'\n'
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     local srcfile="$src/$file"
     local dstfile="$dst/$file"
     [ -f "$srcfile" ] || continue
-    if [ -e "$dstfile" ]; then
-      if [ -d "$dstfile" ]; then
-        die "destination path is a directory: '$file'"
-      fi
-      if cmp -s "$srcfile" "$dstfile"; then
-        continue
-      fi
-      if list_contains "$tracked_list" "$file"; then
-        if list_contains "$dirty_list" "$file"; then
-          if [ "$force" -eq 0 ]; then
-            die "destination file has local changes: '$file'"
-          fi
-        fi
-      else
-        if [ "$force" -eq 0 ]; then
-          die "destination file differs: '$file'"
-        fi
-      fi
-    fi
     if [ "$dryrun" -eq 1 ]; then
       printf '%s\n' "$file"
     else
@@ -614,7 +578,7 @@ cmd_exec() {
 }
 
 cmd_sync() {
-  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 force=0 dryrun=0
+  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 force=1 dryrun=0
   local from_branch="" to_branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in

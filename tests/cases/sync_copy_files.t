@@ -40,9 +40,5 @@ echo "source" > conflict.txt
 cd "$path"
 echo "dest" > conflict.txt
 
-if "$WT_BIN" sync --copy-untracked; then
-  fail "expected conflict"
-fi
-
-"$WT_BIN" sync -f --copy-untracked
+"$WT_BIN" sync --copy-untracked
 [ "$(cat "$path/conflict.txt")" = "source" ] || fail "conflict.txt not overwritten"
