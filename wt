@@ -378,14 +378,29 @@ collect_copy_files() {
   if [ "$copytracked" -eq 1 ]; then
     files+=$(list_tracked_files "$src")$'\n'
   fi
-  local seen="" out=""
-  while IFS= read -r file; do
-    [ -z "$file" ] && continue
-    case "$seen" in *"$file"*) continue ;; esac
-    seen+="$file"$'\n'
-    out+="$file"$'\n'
-  done <<< "$files"
-  printf '%s' "$out"
+  printf '%s' "$files" | sed '/^$/d' | LC_ALL=C sort -u
+}
+
+list_contains() {
+  local haystack="$1"
+  local needle="$2"
+  case "$haystack" in
+  *$'\n'"$needle"$'\n'*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+copy_file() {
+  local src="$1"
+  local dst="$2"
+  case "$(uname)" in
+  Darwin)
+    cp -c "$src" "$dst" 2>/dev/null || cp "$src" "$dst" 2>/dev/null || true
+    ;;
+  *)
+    cp --reflink=auto "$src" "$dst" 2>/dev/null || cp "$src" "$dst" 2>/dev/null || true
+    ;;
+  esac
 }
 
 copy_files_to_worktree() {
@@ -403,7 +418,7 @@ copy_files_to_worktree() {
     local dstfile="$dst/$file"
     [ -f "$srcfile" ] || continue
     mkdir -p "$(dirname "$dstfile")"
-    cp "$srcfile" "$dstfile" 2>/dev/null || true
+    copy_file "$srcfile" "$dstfile"
   done <<< "$files"
 }
 
@@ -417,7 +432,15 @@ copy_files_between() {
   local force="$7"
   local dryrun="${8:-0}"
   local files=""
+  local tracked_list dirty_list
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
+  tracked_list=$'\n'"$(git -C "$dst" ls-files)"$'\n'
+  dirty_list=$'\n'"$(
+    {
+      git -C "$dst" diff --name-only HEAD 2>/dev/null || true
+      git -C "$dst" diff --cached --name-only 2>/dev/null || true
+    } | LC_ALL=C sort -u
+  )"$'\n'
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     local srcfile="$src/$file"
@@ -430,10 +453,8 @@ copy_files_between() {
       if cmp -s "$srcfile" "$dstfile"; then
         continue
       fi
-      if git -C "$dst" ls-files --error-unmatch "$file" >/dev/null 2>&1; then
-        if git -C "$dst" diff --quiet -- "$file" >/dev/null 2>&1 && git -C "$dst" diff --quiet --cached -- "$file" >/dev/null 2>&1; then
-          :
-        else
+      if list_contains "$tracked_list" "$file"; then
+        if list_contains "$dirty_list" "$file"; then
           if [ "$force" -eq 0 ]; then
             die "destination file has local changes: '$file'"
           fi
@@ -448,7 +469,7 @@ copy_files_between() {
       printf '%s\n' "$file"
     else
       mkdir -p "$(dirname "$dstfile")"
-      cp "$srcfile" "$dstfile" 2>/dev/null || true
+      copy_file "$srcfile" "$dstfile"
     fi
   done <<< "$files"
 }
