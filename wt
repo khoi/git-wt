@@ -68,7 +68,6 @@ Flags:
   --copy-ignored    copy gitignored files
   --copy-untracked  copy untracked files
   --copy-modified   copy modified files
-  -f, --force       overwrite destination files (default behavior)
   -n, --dry-run     show files that would be copied
   -h, --help        show help
 USAGE
@@ -589,7 +588,6 @@ cmd_sync() {
     --copy-ignored) copyignored=1 ;;
     --copy-untracked) copyuntracked=1 ;;
     --copy-modified) copymodified=1 ;;
-    -f | --force) ;;
     -n | --dry-run) dryrun=1 ;;
     --)
       shift
