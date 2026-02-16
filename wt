@@ -420,8 +420,7 @@ copy_files_between() {
   local copyuntracked="$4"
   local copymodified="$5"
   local copytracked="$6"
-  local force="$7"
-  local dryrun="${8:-0}"
+  local dryrun="${7:-0}"
   local files=""
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
   while IFS= read -r file; do
@@ -578,7 +577,7 @@ cmd_exec() {
 }
 
 cmd_sync() {
-  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 force=1 dryrun=0
+  local copyignored=0 copyuntracked=0 copymodified=0 copytracked=0 dryrun=0
   local from_branch="" to_branch=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -590,7 +589,7 @@ cmd_sync() {
     --copy-ignored) copyignored=1 ;;
     --copy-untracked) copyuntracked=1 ;;
     --copy-modified) copymodified=1 ;;
-    -f | --force) force=1 ;;
+    -f | --force) ;;
     -n | --dry-run) dryrun=1 ;;
     --)
       shift
@@ -651,7 +650,7 @@ cmd_sync() {
   if [ "$src" = "$dst" ]; then
     die "source and destination are the same"
   fi
-  copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$dryrun"
+  copy_files_between "$src" "$dst" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$dryrun"
 }
 
 cmd_ls() {
