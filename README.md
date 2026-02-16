@@ -90,7 +90,7 @@ Override with `--base-dir <dir>` or `GIT_WT_BASE` (flag wins). `wt ls` lists all
 
 ## Bare repositories
 
-wt supports bare repositories and linked worktrees. `wt root` prints the bare repo path and `wt ls` includes a `(bare)` entry. JSON output includes `is_bare` for each entry. Copy flags and `wt sync` are not supported in bare repositories.
+wt supports bare repositories and linked worktrees. `wt root` prints the bare repo path and `wt ls` includes a `(bare)` entry. JSON output includes `is_bare` for each entry. Copy flags and `wt sync` are supported for linked worktrees in bare repository setups.
 
 ### Quick walkthrough
 
