@@ -553,6 +553,23 @@ reflink_copy_tree_no_overwrite() {
   esac
 }
 
+reflink_copy_dir_new() {
+  local src="$1"
+  local dst="$2"
+  local src_dir="${src%/}"
+  local parent
+  parent=$(dirname "$dst")
+  mkdir -p "$parent"
+  case "$(uname)" in
+  Darwin)
+    cp -cRP "$src_dir" "$parent" 2>/dev/null || cp -RP "$src_dir" "$parent" 2>/dev/null || true
+    ;;
+  *)
+    cp -a --reflink=auto "$src_dir" "$parent" 2>/dev/null || cp -a "$src_dir" "$parent" 2>/dev/null || true
+    ;;
+  esac
+}
+
 remove_path() {
   local path="$1"
   if [ -L "$path" ] || [ -f "$path" ]; then
@@ -612,9 +629,9 @@ copy_dir_recursive() {
       return 0
     fi
   fi
-  if [ "$force" -eq 1 ]; then
-    reflink_copy_tree "$src_dir" "$dst_dir"
-  elif [ "$dst_exists" -eq 0 ]; then
+  if [ "$dst_exists" -eq 0 ]; then
+    reflink_copy_dir_new "$src_dir" "$dst_dir"
+  elif [ "$force" -eq 1 ]; then
     reflink_copy_tree "$src_dir" "$dst_dir"
   else
     reflink_copy_tree_no_overwrite "$src_dir" "$dst_dir"
