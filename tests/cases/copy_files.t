@@ -26,7 +26,13 @@ path=$("$WT_BIN" switch feat-copy --from main --copy-ignored --copy-untracked --
 [ "$(cat "$path/untracked.txt")" = "untracked" ] || fail "untracked.txt content mismatch"
 
 [ -f "$path/README.md" ] || fail "README.md not copied (copy-modified)"
-assert_match "modified" "$(cat "$path/README.md")"
+if printf '%s\n' "$(cat "$path/README.md")" | grep -q "modified"; then
+  fail "README.md should not be overwritten without --force"
+fi
+
+path_force=$("$WT_BIN" switch feat-copy-force --from main --copy-ignored --copy-untracked --copy-modified --force)
+[ -f "$path_force/README.md" ] || fail "README.md not copied with --force"
+assert_match "modified" "$(cat "$path_force/README.md")"
 
 path2=$("$WT_BIN" switch feat-nocopy --from main)
 [ ! -f "$path2/.env" ] || fail ".env should not be copied without flag"

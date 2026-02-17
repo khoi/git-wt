@@ -25,4 +25,9 @@ run_cmd "$WT_BIN" sync feat-a feat-a --copy-modified
 assert_rc 0
 
 "$WT_BIN" sync feat-a feat-b --copy-modified
+if printf '%s\n' "$(cat "$path_b/README.md")" | grep -q "change"; then
+  fail "README.md should not be overwritten without --force"
+fi
+
+"$WT_BIN" sync feat-a feat-b --copy-modified --force
 assert_match "change" "$(cat "$path_b/README.md")"

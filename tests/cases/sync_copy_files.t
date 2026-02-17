@@ -28,6 +28,11 @@ cd "$path"
 [ "$(cat "$path/untracked.txt")" = "untracked" ] || fail "untracked.txt content mismatch"
 
 [ -f "$path/README.md" ] || fail "README.md not copied (copy-modified)"
+if printf '%s\n' "$(cat "$path/README.md")" | grep -q "modified"; then
+  fail "README.md should not be overwritten without --force"
+fi
+
+"$WT_BIN" sync --copy-modified --force
 assert_match "modified" "$(cat "$path/README.md")"
 
 if "$WT_BIN" sync; then
@@ -41,4 +46,7 @@ cd "$path"
 echo "dest" > conflict.txt
 
 "$WT_BIN" sync --copy-untracked
-[ "$(cat "$path/conflict.txt")" = "source" ] || fail "conflict.txt not overwritten"
+[ "$(cat "$path/conflict.txt")" = "dest" ] || fail "conflict.txt should not be overwritten without --force"
+
+"$WT_BIN" sync --copy-untracked --force
+[ "$(cat "$path/conflict.txt")" = "source" ] || fail "conflict.txt not overwritten with --force"
