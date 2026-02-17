@@ -436,6 +436,31 @@ filter_nested_worktree_prefixes() {
   printf '%s' "$out"
 }
 
+prune_nested_copy_paths() {
+  local files="$1"
+  local out="" dirs="" file file_trim dir skip
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    file_trim="${file%/}"
+    skip=0
+    while IFS= read -r dir; do
+      [ -n "$dir" ] || continue
+      case "$file_trim" in
+      "$dir"/*)
+        skip=1
+        break
+        ;;
+      esac
+    done <<< "$dirs"
+    [ "$skip" -eq 1 ] && continue
+    out+="$file"$'\n'
+    if [ "$file" != "$file_trim" ]; then
+      dirs+="$file_trim"$'\n'
+    fi
+  done <<< "$files"
+  printf '%s' "$out"
+}
+
 collect_copy_files() {
   local src="$1"
   local copyignored="$2"
@@ -451,7 +476,10 @@ collect_copy_files() {
   prefixes=$(list_nested_worktree_prefixes "$src")
   if [ "$sources" -eq 1 ]; then
     if [ "$copyignored" -eq 1 ]; then
-      filter_nested_worktree_prefixes "$(list_ignored_files "$src")" "$prefixes"
+      local ignored
+      ignored=$(filter_nested_worktree_prefixes "$(list_ignored_files "$src")" "$prefixes")
+      ignored=$(printf '%s' "$ignored" | sed '/^$/d' | LC_ALL=C sort -u)
+      prune_nested_copy_paths "$ignored"
       return
     fi
     if [ "$copyuntracked" -eq 1 ]; then
@@ -480,7 +508,8 @@ collect_copy_files() {
   fi
   local deduped
   deduped=$(printf '%s' "$files" | sed '/^$/d' | LC_ALL=C sort -u)
-  filter_nested_worktree_prefixes "$deduped" "$prefixes"
+  deduped=$(filter_nested_worktree_prefixes "$deduped" "$prefixes")
+  prune_nested_copy_paths "$deduped"
 }
 
 reflink_copy_file() {
@@ -506,6 +535,20 @@ reflink_copy_tree() {
     ;;
   *)
     cp -a --reflink=auto "$src/." "$dst" 2>/dev/null || cp -a "$src/." "$dst" 2>/dev/null || true
+    ;;
+  esac
+}
+
+reflink_copy_tree_no_overwrite() {
+  local src="$1"
+  local dst="$2"
+  mkdir -p "$dst"
+  case "$(uname)" in
+  Darwin)
+    cp -cnRP "$src/." "$dst" 2>/dev/null || cp -nRP "$src/." "$dst" 2>/dev/null || true
+    ;;
+  *)
+    cp -a -n --reflink=auto "$src/." "$dst" 2>/dev/null || cp -a -n "$src/." "$dst" 2>/dev/null || true
     ;;
   esac
 }
@@ -557,31 +600,25 @@ copy_dir_recursive() {
   local src_dir="$1"
   local dst_dir="$2"
   local force="${3:-0}"
+  local dst_exists=0
   if [ -e "$dst_dir" ] || [ -L "$dst_dir" ]; then
+    dst_exists=1
     if [ -d "$dst_dir" ] && [ ! -L "$dst_dir" ]; then
       :
     elif [ "$force" -eq 1 ]; then
       remove_path "$dst_dir"
+      dst_exists=0
     else
       return 0
     fi
   fi
-  mkdir -p "$dst_dir"
-  local entry name dst_entry
-  for entry in "$src_dir"/* "$src_dir"/.[!.]* "$src_dir"/..?*; do
-    if [ ! -e "$entry" ] && [ ! -L "$entry" ]; then
-      continue
-    fi
-    name=${entry##*/}
-    dst_entry="$dst_dir/$name"
-    if [ -L "$entry" ]; then
-      copy_symlink "$entry" "$dst_entry" "$force"
-    elif [ -d "$entry" ]; then
-      copy_dir_recursive "$entry" "$dst_entry" "$force"
-    elif [ -f "$entry" ]; then
-      copy_file "$entry" "$dst_entry" "$force"
-    fi
-  done
+  if [ "$force" -eq 1 ]; then
+    reflink_copy_tree "$src_dir" "$dst_dir"
+  elif [ "$dst_exists" -eq 0 ]; then
+    reflink_copy_tree "$src_dir" "$dst_dir"
+  else
+    reflink_copy_tree_no_overwrite "$src_dir" "$dst_dir"
+  fi
 }
 
 copy_tree() {
