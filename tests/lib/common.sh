@@ -19,7 +19,7 @@ assert_ne() {
 }
 
 assert_match() {
-  if ! printf '%s' "$2" | grep -q -- "$1"; then
+  if ! grep -q -- "$1" <<< "$2"; then
     fail "expected '$2' to match '$1'"
   fi
 }
@@ -59,6 +59,8 @@ new_bare_repo_with_worktree() {
   bare=$(mktemp -d)
   rm -rf "$bare"
   git clone --bare "$src" "$bare" >/dev/null
+  git -C "$bare" config user.email "test@example.com"
+  git -C "$bare" config user.name "test"
   wt=$(mktemp -d)
   git -C "$bare" worktree add "$wt" main >/dev/null
   BARE_SOURCE_REPO="$src"
