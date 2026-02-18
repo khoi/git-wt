@@ -360,6 +360,10 @@ json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
+detect_jobs() {
+  sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 1
+}
+
 list_ignored_files() {
   local root="$1"
   git -C "$root" ls-files --others --ignored --exclude-standard --directory | sed '/^\.git\//d'
@@ -658,6 +662,31 @@ copy_path() {
   fi
 }
 
+copy_entry() {
+  local entry="$1" src="$2" dst="$3" force="${4:-0}" verbose="${5:-0}"
+  [ -n "$entry" ] || return 0
+  local entry_trim="${entry%/}"
+  local srcfile="$src/$entry_trim"
+  local dstfile="$dst/$entry_trim"
+  [ -e "$srcfile" ] || [ -L "$srcfile" ] || return 0
+  [ "$verbose" -eq 1 ] && printf 'copy %s\n' "$entry_trim" >&2
+  copy_path "$srcfile" "$dstfile" "$force"
+}
+
+copy_entries_parallel() {
+  local src="$1" dst="$2" files="$3" force="${4:-0}" verbose="${5:-0}"
+  local jobs
+  jobs=$(detect_jobs)
+  local tmpfile
+  tmpfile=$(mktemp)
+  printf '%s' "$files" | sed '/^$/d' > "$tmpfile"
+  export -f copy_entry copy_path copy_symlink copy_tree copy_dir_recursive \
+    copy_file reflink_copy_file reflink_copy_tree reflink_copy_tree_no_overwrite \
+    reflink_copy_dir_new remove_path
+  xargs -P "$jobs" -I{} bash -c 'copy_entry "$@"' _ {} "$src" "$dst" "$force" "$verbose" < "$tmpfile"
+  rm -f "$tmpfile"
+}
+
 copy_files_to_worktree() {
   local src="$1"
   local dst="$2"
@@ -667,23 +696,9 @@ copy_files_to_worktree() {
   local copytracked="$6"
   local force="${7:-0}"
   local verbose="${8:-0}"
-  local files=""
-  local total=0 index=0
+  local files
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
-  total=$(printf '%s\n' "$files" | sed '/^$/d' | awk 'END { print NR+0 }')
-  while IFS= read -r file; do
-    [ -z "$file" ] && continue
-    local srcfile="$src/$file"
-    local dstfile="$dst/$file"
-    if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
-      continue
-    fi
-    index=$((index + 1))
-    if [ "$verbose" -eq 1 ]; then
-      printf '[%s/%s] copy %s\n' "$index" "$total" "$file" >&2
-    fi
-    copy_path "$srcfile" "$dstfile" "$force"
-  done <<< "$files"
+  copy_entries_parallel "$src" "$dst" "$files" "$force" "$verbose"
 }
 
 copy_files_between() {
@@ -696,8 +711,6 @@ copy_files_between() {
   local dryrun="${7:-0}"
   local verbose="${8:-0}"
   local force="${9:-0}"
-  local files=""
-  local total=0 index=0
   if [ "$src" = "$dst" ] || { [ -d "$src" ] && [ -d "$dst" ] && [ "$src" -ef "$dst" ]; }; then
     return 0
   fi
@@ -705,29 +718,22 @@ copy_files_between() {
     collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked"
     return 0
   fi
+  local files
   files=$(collect_copy_files "$src" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked")
-  total=$(printf '%s\n' "$files" | sed '/^$/d' | awk 'END { print NR+0 }')
-  while IFS= read -r file; do
-    [ -z "$file" ] && continue
-    local srcfile="$src/$file"
-    local dstfile="$dst/$file"
-    if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
-      continue
-    fi
-    index=$((index + 1))
-    if [ "$verbose" -eq 1 ]; then
-      if [ "$dryrun" -eq 1 ]; then
-        printf '[%s/%s] would copy %s\n' "$index" "$total" "$file" >&2
-      else
-        printf '[%s/%s] copy %s\n' "$index" "$total" "$file" >&2
+  if [ "$dryrun" -eq 1 ]; then
+    local file
+    while IFS= read -r file; do
+      [ -z "$file" ] && continue
+      local srcfile="$src/$file"
+      if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
+        continue
       fi
-    fi
-    if [ "$dryrun" -eq 1 ]; then
+      [ "$verbose" -eq 1 ] && printf 'would copy %s\n' "$file" >&2
       printf '%s\n' "$file"
-    else
-      copy_path "$srcfile" "$dstfile" "$force"
-    fi
-  done <<< "$files"
+    done <<< "$files"
+    return 0
+  fi
+  copy_entries_parallel "$src" "$dst" "$files" "$force" "$verbose"
 }
 
 open_path() {
