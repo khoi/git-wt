@@ -15,9 +15,9 @@ cd "$path"
 run_cmd "$WT_BIN" sync --copy-untracked --dry-run --verbose
 assert_rc 0
 assert_match "untracked.txt" "$RUN_OUT"
-assert_match "would copy untracked.txt" "$RUN_ERR"
+assert_match "untracked.txt" "$RUN_ERR"
 
 run_cmd "$WT_BIN" sync --copy-untracked --dry-run -v
 assert_rc 0
 assert_match "untracked.txt" "$RUN_OUT"
-assert_match "would copy untracked.txt" "$RUN_ERR"
+assert_match "untracked.txt" "$RUN_ERR"

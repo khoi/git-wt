@@ -669,7 +669,7 @@ copy_entry() {
   local srcfile="$src/$entry_trim"
   local dstfile="$dst/$entry_trim"
   [ -e "$srcfile" ] || [ -L "$srcfile" ] || return 0
-  [ "$verbose" -eq 1 ] && printf 'copy %s\n' "$entry_trim" >&2
+  [ "$verbose" -eq 1 ] && printf '%s\n' "$entry_trim" >&2
   copy_path "$srcfile" "$dstfile" "$force"
 }
 
@@ -728,7 +728,7 @@ copy_files_between() {
       if [ ! -e "$srcfile" ] && [ ! -L "$srcfile" ]; then
         continue
       fi
-      [ "$verbose" -eq 1 ] && printf 'would copy %s\n' "$file" >&2
+      [ "$verbose" -eq 1 ] && printf '%s\n' "$file" >&2
       printf '%s\n' "$file"
     done <<< "$files"
     return 0
