@@ -24,6 +24,12 @@ assert_match() {
   fi
 }
 
+assert_not_match() {
+  if grep -q -- "$1" <<< "$2"; then
+    fail "expected '$2' to not match '$1'"
+  fi
+}
+
 run_cmd() {
   local err_file
   err_file=$(mktemp)
@@ -53,6 +59,21 @@ new_repo() {
   printf '%s\n' "$dir"
 }
 
+new_repo_with_submodule() {
+  local parent source
+  parent=$(new_repo)
+  source=$(new_repo)
+  git -C "$parent" -c protocol.file.allow=always submodule add "$source" deps/ServiceA >/dev/null
+  git -C "$parent" commit -am "add submodule" >/dev/null
+  SUBMODULE_PARENT_REPO="$parent"
+  SUBMODULE_SOURCE_REPO="$source"
+  SUBMODULE_PATH="$parent/deps/ServiceA"
+  export SUBMODULE_PARENT_REPO
+  export SUBMODULE_SOURCE_REPO
+  export SUBMODULE_PATH
+  printf '%s\n' "$parent"
+}
+
 new_bare_repo_with_worktree() {
   local src bare wt
   src=$(new_repo)
@@ -76,6 +97,15 @@ setup_repo() {
   REPO=$(new_repo)
   export REPO
   trap "cleanup_repo '$REPO'" EXIT
+}
+
+setup_repo_with_submodule() {
+  new_repo_with_submodule >/dev/null
+  trap "cleanup_repo '$SUBMODULE_PARENT_REPO'; cleanup_repo '$SUBMODULE_SOURCE_REPO'" EXIT
+  REPO="$SUBMODULE_PARENT_REPO"
+  SUBMODULE_REPO="$SUBMODULE_PATH"
+  export REPO
+  export SUBMODULE_REPO
 }
 
 setup_bare_repo_with_worktree() {

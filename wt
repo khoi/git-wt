@@ -180,6 +180,16 @@ repo_is_bare() {
   [ "$is_bare" = "true" ]
 }
 
+canonical_worktree_path() {
+  local path="$1"
+  local resolved
+  if resolved=$(git -C "$path" rev-parse --show-toplevel 2>/dev/null); then
+    normalize_dir "$resolved"
+    return
+  fi
+  normalize_dir "$path"
+}
+
 main_worktree_path() {
   local common
   common=$(common_git_dir_abs)
@@ -191,7 +201,7 @@ main_worktree_path() {
   while IFS= read -r line || [ -n "$line" ]; do
     if [ -z "$line" ]; then
       if [ -n "$path" ] && [ "$is_bare" -eq 0 ]; then
-        printf '%s\n' "$path"
+        canonical_worktree_path "$path"
         return
       fi
       path=""
@@ -204,7 +214,7 @@ main_worktree_path() {
     esac
   done < <(git worktree list --porcelain)
   if [ -n "$path" ] && [ "$is_bare" -eq 0 ]; then
-    printf '%s\n' "$path"
+    canonical_worktree_path "$path"
     return
   fi
   git rev-parse --show-toplevel
@@ -283,7 +293,11 @@ worktree_entries() {
   while IFS= read -r line || [ -n "$line" ]; do
     if [ -z "$line" ]; then
       if [ -n "$path" ]; then
-        printf '%s\t%s\t%s\t%s\n' "$path" "$head" "$branch" "$is_bare"
+        local output_path="$path"
+        if [ "$is_bare" -eq 0 ]; then
+          output_path=$(canonical_worktree_path "$path")
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$output_path" "$head" "$branch" "$is_bare"
       fi
       path=""
       head=""
@@ -303,7 +317,11 @@ worktree_entries() {
     esac
   done < <(git -C "$root" worktree list --porcelain)
   if [ -n "$path" ]; then
-    printf '%s\t%s\t%s\t%s\n' "$path" "$head" "$branch" "$is_bare"
+    local output_path="$path"
+    if [ "$is_bare" -eq 0 ]; then
+      output_path=$(canonical_worktree_path "$path")
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$output_path" "$head" "$branch" "$is_bare"
   fi
 }
 
