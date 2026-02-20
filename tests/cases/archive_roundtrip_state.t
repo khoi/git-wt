@@ -8,8 +8,9 @@ repo="$REPO"
 
 cd "$repo"
 printf '*.tmp\n' > .gitignore
-git add .gitignore
-git commit -m "ignore tmp files" >/dev/null
+printf 'tracked baseline\n' > TRACKED_ONLY.txt
+git add .gitignore TRACKED_ONLY.txt
+git commit -m "prepare archive fixtures" >/dev/null
 
 path=$("$WT_BIN" switch feat-archive --from main)
 printf 'staged\n' >> "$path/README.md"
@@ -17,6 +18,7 @@ git -C "$path" add README.md
 printf 'unstaged\n' >> "$path/README.md"
 printf 'staged file\n' > "$path/staged.txt"
 git -C "$path" add staged.txt
+printf 'pure unstaged\n' >> "$path/TRACKED_ONLY.txt"
 printf 'untracked file\n' > "$path/untracked.txt"
 printf 'ignored file\n' > "$path/ignored.tmp"
 
@@ -42,6 +44,7 @@ restored=$("$WT_BIN" unarchive feat-archive)
 status=$(git -C "$restored" status --porcelain)
 assert_match "MM README.md" "$status"
 assert_match "A  staged.txt" "$status"
+assert_match " M TRACKED_ONLY.txt" "$status"
 assert_match "?? untracked.txt" "$status"
 assert_not_match "ignored.tmp" "$status"
 [ ! -e "$restored/ignored.tmp" ] || fail "ignored file restored"
