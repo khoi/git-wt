@@ -593,13 +593,20 @@ choose_unarchive_branch() {
     printf '%s\n' "$branch"
     return
   fi
-  local candidate="${branch}-restored"
-  local n=2
-  while ! branch_ref_available "$root" "$candidate"; do
-    candidate="${branch}-restored-$n"
-    n=$((n + 1))
-  done
-  printf '%s\n' "$candidate"
+  local candidate
+  if candidate=$(next_available_branch_name "$root" "${branch}-restored"); then
+    printf '%s\n' "$candidate"
+    return
+  fi
+  if [[ "$branch" == */* ]]; then
+    local flat_base
+    flat_base="${branch//\//-}-restored"
+    if candidate=$(next_available_branch_name "$root" "$flat_base"); then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  fi
+  die "unable to choose restored branch name for '$branch'"
 }
 
 branch_ref_available() {
@@ -620,6 +627,38 @@ branch_ref_available() {
     fi
   done
   return 0
+}
+
+branch_parent_conflict() {
+  local root="$1"
+  local branch="$2"
+  local prefix="$branch"
+  while [[ "$prefix" == */* ]]; do
+    prefix="${prefix%/*}"
+    if git -C "$root" show-ref --verify --quiet "refs/heads/$prefix"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+next_available_branch_name() {
+  local root="$1"
+  local base="$2"
+  if branch_parent_conflict "$root" "$base"; then
+    return 1
+  fi
+  local candidate="$base"
+  local n=2
+  local limit=1000
+  while ! branch_ref_available "$root" "$candidate"; do
+    if [ "$n" -gt "$limit" ]; then
+      return 1
+    fi
+    candidate="${base}-$n"
+    n=$((n + 1))
+  done
+  printf '%s\n' "$candidate"
 }
 
 path_taken() {
