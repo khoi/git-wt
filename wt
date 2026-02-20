@@ -82,6 +82,8 @@ ls_usage() {
   cat <<'USAGE'
 wt ls
 
+Lists active worktrees and archived entries.
+
 Flags:
   --plain         tab-delimited output
   --json          JSON output
@@ -412,6 +414,40 @@ archive_index_ref() {
 archive_worktree_ref() {
   local branch="$1"
   printf '%s/worktree\n' "$(archive_ref_prefix "$branch")"
+}
+
+archive_entries() {
+  local root="$1"
+  local ref branch content meta_branch="" meta_head="" meta_path="" meta_base="" line key value
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    branch="${ref#refs/wt/archive/}"
+    branch="${branch%/meta}"
+    if ! content=$(git -C "$root" cat-file -p "$ref" 2>/dev/null); then
+      continue
+    fi
+    meta_branch=""
+    meta_head=""
+    meta_path=""
+    meta_base=""
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] || continue
+      key=${line%%=*}
+      value=${line#*=}
+      case "$key" in
+      branch) meta_branch="$value" ;;
+      head_commit) meta_head="$value" ;;
+      worktree_path) meta_path="$value" ;;
+      base_dir) meta_base="$value" ;;
+      esac
+    done <<< "$content"
+    if [ -n "$meta_branch" ]; then
+      branch="$meta_branch"
+    fi
+    [ -n "$meta_path" ] || meta_path="(unknown)"
+    [ -n "$meta_head" ] || meta_head="(unknown)"
+    printf '%s\t%s\t%s\t%s\n' "$branch" "$meta_path" "$meta_head" "$meta_base"
+  done < <(git -C "$root" for-each-ref --format='%(refname)' refs/wt/archive | sed -n '/\/meta$/p')
 }
 
 archive_has_any_refs() {
@@ -1228,8 +1264,9 @@ cmd_ls() {
   elif [ ! -t 1 ]; then
     mode="plain"
   fi
-  local entries
+  local entries archived_entries
   entries=$(worktree_entries "$root")
+  archived_entries=$(archive_entries "$root")
   local filtered=""
   if [ -n "$BASE_DIR_OVERRIDE" ]; then
     base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
@@ -1238,15 +1275,34 @@ cmd_ls() {
       local path head branch is_bare
       parse_worktree_entry "$entry"
       if [ "$is_bare" = "1" ]; then
-        filtered+="(bare)\t$path\t$head\t1\n"
+        filtered+="(bare)\t$path\t$head\t1\t0\n"
         continue
       fi
       case "$path" in
       "$base"/*)
-        filtered+="$branch\t$path\t$head\t0\n"
+        filtered+="$branch\t$path\t$head\t0\t0\n"
         ;;
       esac
     done <<<"$entries"
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      local branch path head archived_base rest
+      branch=${entry%%$'\t'*}
+      rest=${entry#*$'\t'}
+      path=${rest%%$'\t'*}
+      rest=${rest#*$'\t'}
+      head=${rest%%$'\t'*}
+      archived_base=${rest#*$'\t'}
+      case "$path" in
+      "$base"/*)
+        filtered+="$branch\t$path\t$head\t0\t1\n"
+        continue
+        ;;
+      esac
+      if [ -n "$archived_base" ] && [ "$archived_base" = "$base" ]; then
+        filtered+="$branch\t$path\t$head\t0\t1\n"
+      fi
+    done <<<"$archived_entries"
   else
     while IFS= read -r entry; do
       [ -n "$entry" ] || continue
@@ -1255,8 +1311,18 @@ cmd_ls() {
       if [ "$is_bare" = "1" ]; then
         branch="(bare)"
       fi
-      filtered+="$branch\t$path\t$head\t$is_bare\n"
+      filtered+="$branch\t$path\t$head\t$is_bare\t0\n"
     done <<<"$entries"
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      local branch path head rest
+      branch=${entry%%$'\t'*}
+      rest=${entry#*$'\t'}
+      path=${rest%%$'\t'*}
+      rest=${rest#*$'\t'}
+      head=${rest%%$'\t'*}
+      filtered+="$branch\t$path\t$head\t0\t1\n"
+    done <<<"$archived_entries"
   fi
   case "$mode" in
   json)
@@ -1264,31 +1330,67 @@ cmd_ls() {
     local first=1
     while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] || continue
-      local branch path head rest is_bare is_bare_json
+      local branch path head rest is_bare is_archived is_bare_json is_archived_json
       branch=${line%%$'\t'*}
       rest=${line#*$'\t'}
       path=${rest%%$'\t'*}
       rest=${rest#*$'\t'}
       head=${rest%%$'\t'*}
-      is_bare=${rest#*$'\t'}
+      rest=${rest#*$'\t'}
+      is_bare=${rest%%$'\t'*}
+      is_archived=${rest#*$'\t'}
       if [ "$is_bare" = "1" ]; then
         is_bare_json="true"
       else
         is_bare_json="false"
       fi
+      if [ "$is_archived" = "1" ]; then
+        is_archived_json="true"
+      else
+        is_archived_json="false"
+      fi
       if [ "$first" -eq 0 ]; then
         printf ','
       fi
       first=0
-      printf '{"branch":"%s","path":"%s","head":"%s","is_bare":%s}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")" "$is_bare_json"
+      printf '{"branch":"%s","path":"%s","head":"%s","is_bare":%s,"is_archived":%s}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")" "$is_bare_json" "$is_archived_json"
     done <<<"$(printf '%b' "$filtered")"
     printf ']\n'
     ;;
   plain)
-    printf '%b' "$filtered" | awk -F'\t' 'NF>=2 {print $1"\t"$2}'
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] || continue
+      local branch path rest is_archived label
+      branch=${line%%$'\t'*}
+      rest=${line#*$'\t'}
+      path=${rest%%$'\t'*}
+      rest=${rest#*$'\t'}
+      rest=${rest#*$'\t'}
+      is_archived=${rest#*$'\t'}
+      label="$branch"
+      if [ "$is_archived" = "1" ]; then
+        label="$branch (archived)"
+      fi
+      printf '%s\t%s\n' "$label" "$path"
+    done <<<"$(printf '%b' "$filtered")"
     ;;
   table)
-    printf '%b' "$filtered" | awk -F'\t' 'NF>=3 {printf "%-30s %-60s %s\n", $1, $2, $3}'
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] || continue
+      local branch path head rest is_archived label
+      branch=${line%%$'\t'*}
+      rest=${line#*$'\t'}
+      path=${rest%%$'\t'*}
+      rest=${rest#*$'\t'}
+      head=${rest%%$'\t'*}
+      rest=${rest#*$'\t'}
+      is_archived=${rest#*$'\t'}
+      label="$branch"
+      if [ "$is_archived" = "1" ]; then
+        label="$branch (archived)"
+      fi
+      printf '%-30s %-60s %s\n' "$label" "$path" "$head"
+    done <<<"$(printf '%b' "$filtered")"
     ;;
   esac
 }

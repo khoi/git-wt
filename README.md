@@ -89,7 +89,7 @@ wt <subcommand> --help
 
 By default worktrees are stored at `<gitroot>/.worktrees`
 
-Override with `--base-dir <dir>` or `GIT_WT_BASE` (flag wins). `wt ls` lists all worktrees unless `--base-dir` is set. `wt archive` and `wt unarchive` read and restore paths in the same base-dir context.
+Override with `--base-dir <dir>` or `GIT_WT_BASE` (flag wins). `wt ls` lists active worktrees and archived entries unless `--base-dir` is set. `wt archive` and `wt unarchive` read and restore paths in the same base-dir context.
 
 Set `GIT_WT_POST_SWITCH` to run a setup command after `wt switch` and `wt unarchive`. The command runs with `WT_BRANCH`, `WT_PATH`, and `WT_ROOT` in the environment.
 
