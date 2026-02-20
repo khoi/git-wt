@@ -18,6 +18,8 @@ Commands:
   exec <branch>   open a workspace and run a command
   sync [from to]  copy files between worktrees
   ls              list workspaces
+  archive <branch> save workspace state and remove worktree
+  unarchive <branch> restore workspace from archive
   rm <branch>     remove a workspace
   merge <target>  squash, rebase, and merge to target
   here            print current workspace branch
@@ -93,6 +95,25 @@ wt rm <branch>
 
 Flags:
   -f, --force     remove even if dirty
+  -h, --help      show help
+USAGE
+}
+
+archive_usage() {
+  cat <<'USAGE'
+wt archive <branch>
+
+Flags:
+  -h, --help      show help
+USAGE
+}
+
+unarchive_usage() {
+  cat <<'USAGE'
+wt unarchive <branch>
+
+Flags:
+  --path <dir>    explicit worktree path
   -h, --help      show help
 USAGE
 }
@@ -371,6 +392,218 @@ find_worktree_by_path() {
     fi
   done < <(worktree_entries "$root")
   return 1
+}
+
+archive_ref_prefix() {
+  local branch="$1"
+  printf 'refs/wt/archive/%s\n' "$branch"
+}
+
+archive_meta_ref() {
+  local branch="$1"
+  printf '%s/meta\n' "$(archive_ref_prefix "$branch")"
+}
+
+archive_index_ref() {
+  local branch="$1"
+  printf '%s/index\n' "$(archive_ref_prefix "$branch")"
+}
+
+archive_worktree_ref() {
+  local branch="$1"
+  printf '%s/worktree\n' "$(archive_ref_prefix "$branch")"
+}
+
+archive_has_any_refs() {
+  local root="$1"
+  local branch="$2"
+  local ref
+  for ref in "$(archive_meta_ref "$branch")" "$(archive_index_ref "$branch")" "$(archive_worktree_ref "$branch")"; do
+    if git -C "$root" show-ref --verify --quiet "$ref"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+archive_refs_complete() {
+  local root="$1"
+  local branch="$2"
+  git -C "$root" show-ref --verify --quiet "$(archive_meta_ref "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_index_ref "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_worktree_ref "$branch")"
+}
+
+archive_delete_refs() {
+  local root="$1"
+  local branch="$2"
+  git -C "$root" update-ref -d "$(archive_meta_ref "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_index_ref "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_worktree_ref "$branch")" 2>/dev/null || true
+}
+
+utc_now() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+write_archive_metadata() {
+  local root="$1"
+  local branch="$2"
+  local head_commit="$3"
+  local worktree_path="$4"
+  local base="$5"
+  local archived_at="$6"
+  local meta_oid
+  meta_oid=$(printf 'version=1\nbranch=%s\nhead_commit=%s\nworktree_path=%s\nbase_dir=%s\narchived_at=%s\n' \
+    "$branch" "$head_commit" "$worktree_path" "$base" "$archived_at" |
+    git -C "$root" hash-object -w --stdin)
+  git -C "$root" update-ref "$(archive_meta_ref "$branch")" "$meta_oid"
+}
+
+ARCHIVE_META_VERSION=""
+ARCHIVE_META_BRANCH=""
+ARCHIVE_META_HEAD_COMMIT=""
+ARCHIVE_META_WORKTREE_PATH=""
+ARCHIVE_META_BASE_DIR=""
+ARCHIVE_META_ARCHIVED_AT=""
+
+read_archive_metadata() {
+  local root="$1"
+  local branch="$2"
+  local content
+  if ! content=$(git -C "$root" cat-file -p "$(archive_meta_ref "$branch")" 2>/dev/null); then
+    die "archive not found: '$branch'"
+  fi
+  ARCHIVE_META_VERSION=""
+  ARCHIVE_META_BRANCH=""
+  ARCHIVE_META_HEAD_COMMIT=""
+  ARCHIVE_META_WORKTREE_PATH=""
+  ARCHIVE_META_BASE_DIR=""
+  ARCHIVE_META_ARCHIVED_AT=""
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+    version) ARCHIVE_META_VERSION="$value" ;;
+    branch) ARCHIVE_META_BRANCH="$value" ;;
+    head_commit) ARCHIVE_META_HEAD_COMMIT="$value" ;;
+    worktree_path) ARCHIVE_META_WORKTREE_PATH="$value" ;;
+    base_dir) ARCHIVE_META_BASE_DIR="$value" ;;
+    archived_at) ARCHIVE_META_ARCHIVED_AT="$value" ;;
+    esac
+  done <<< "$content"
+  [ "$ARCHIVE_META_VERSION" = "1" ] || die "unsupported archive metadata version for '$branch'"
+  [ "$ARCHIVE_META_BRANCH" = "$branch" ] || die "archive metadata mismatch for '$branch'"
+  [ -n "$ARCHIVE_META_HEAD_COMMIT" ] || die "archive metadata missing head_commit for '$branch'"
+  [ -n "$ARCHIVE_META_WORKTREE_PATH" ] || die "archive metadata missing worktree_path for '$branch'"
+}
+
+capture_archive_trees() {
+  local path="$1"
+  ARCHIVE_CAPTURE_INDEX_TREE=$(git -C "$path" write-tree)
+  local tmp_index
+  tmp_index=$(mktemp)
+  if ! GIT_INDEX_FILE="$tmp_index" git -C "$path" read-tree HEAD >/dev/null; then
+    rm -f "$tmp_index"
+    die "failed to capture archive state"
+  fi
+  if ! GIT_INDEX_FILE="$tmp_index" git -C "$path" add -A >/dev/null; then
+    rm -f "$tmp_index"
+    die "failed to capture archive state"
+  fi
+  if ! ARCHIVE_CAPTURE_WORKTREE_TREE=$(GIT_INDEX_FILE="$tmp_index" git -C "$path" write-tree); then
+    rm -f "$tmp_index"
+    die "failed to capture archive state"
+  fi
+  rm -f "$tmp_index"
+}
+
+choose_unarchive_branch() {
+  local root="$1"
+  local branch="$2"
+  local archived_head="$3"
+  if ! git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
+    printf '%s\n' "$branch"
+    return
+  fi
+  local branch_taken=0
+  if find_worktree_by_branch "$root" "$branch" >/dev/null; then
+    branch_taken=1
+  fi
+  local current_head
+  current_head=$(git -C "$root" rev-parse --verify "refs/heads/$branch")
+  if [ "$branch_taken" -eq 0 ] && [ "$current_head" = "$archived_head" ]; then
+    printf '%s\n' "$branch"
+    return
+  fi
+  local candidate="${branch}-restored"
+  local n=2
+  while git -C "$root" show-ref --verify --quiet "refs/heads/$candidate"; do
+    candidate="${branch}-restored-$n"
+    n=$((n + 1))
+  done
+  printf '%s\n' "$candidate"
+}
+
+path_taken() {
+  local root="$1"
+  local path="$2"
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    return 0
+  fi
+  if find_worktree_by_path "$root" "$path" >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+choose_unarchive_path() {
+  local root="$1"
+  local preferred="$2"
+  if ! path_taken "$root" "$preferred"; then
+    printf '%s\n' "$preferred"
+    return
+  fi
+  local candidate="${preferred}-restored"
+  local n=2
+  while path_taken "$root" "$candidate"; do
+    candidate="${preferred}-restored-$n"
+    n=$((n + 1))
+  done
+  printf '%s\n' "$candidate"
+}
+
+restore_archive_state() {
+  local path="$1"
+  local worktree_tree="$2"
+  local index_tree="$3"
+  git -C "$path" read-tree --reset -u "$worktree_tree"
+  git -C "$path" read-tree --reset "$index_tree"
+}
+
+run_post_switch_hook() {
+  local branch="$1"
+  local path="$2"
+  local hook="${GIT_WT_POST_SWITCH:-}"
+  [ -n "$hook" ] || return 0
+  local root
+  root=$(main_worktree_path)
+  WT_BRANCH="$branch" WT_PATH="$path" WT_ROOT="$root" sh -c "$hook"
+}
+
+cleanup_unarchive_failure() {
+  local root="$1"
+  local path="$2"
+  local branch="$3"
+  local delete_branch="$4"
+  git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
+  command rm -rf "$path" 2>/dev/null || true
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  if [ "$delete_branch" = "1" ]; then
+    git -C "$root" branch -D "$branch" >/dev/null 2>&1 || true
+  fi
 }
 
 json_escape() {
@@ -845,7 +1078,12 @@ cmd_switch() {
     shift
   done
   [ -n "$branch" ] || die "missing branch"
-  open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$verbose"
+  local path
+  path=$(open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$verbose")
+  if ! run_post_switch_hook "$branch" "$path"; then
+    die "post-switch hook failed"
+  fi
+  printf '%s\n' "$path"
 }
 
 cmd_exec() {
@@ -1112,6 +1350,120 @@ cmd_rm() {
   printf '%s\n' "$path"
 }
 
+cmd_archive() {
+  local branch=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    -h | --help)
+      archive_usage
+      exit 0
+      ;;
+    --*) die "unknown flag '$1'" ;;
+    *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
+    esac
+    shift
+  done
+  [ -n "$branch" ] || die "missing branch"
+  require_repo
+  local root path base head_commit archived_at
+  root=$(main_worktree_path)
+  base=$(base_dir "$root" "$BASE_DIR_OVERRIDE")
+  if ! path=$(find_worktree_by_branch "$root" "$branch"); then
+    die "workspace not found: '$branch'"
+  fi
+  if [ "$path" = "$root" ]; then
+    die "cannot archive main worktree"
+  fi
+  if archive_has_any_refs "$root" "$branch"; then
+    die "archive already exists: '$branch'"
+  fi
+  if ! head_commit=$(git -C "$root" rev-parse --verify "refs/heads/$branch" 2>/dev/null); then
+    die "branch not found: '$branch'"
+  fi
+  capture_archive_trees "$path"
+  archived_at=$(utc_now)
+  git -C "$root" update-ref "$(archive_index_ref "$branch")" "$ARCHIVE_CAPTURE_INDEX_TREE"
+  git -C "$root" update-ref "$(archive_worktree_ref "$branch")" "$ARCHIVE_CAPTURE_WORKTREE_TREE"
+  write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at"
+  git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
+  command rm -rf "$path" 2>/dev/null || true
+  git -C "$root" worktree prune >/dev/null 2>&1 || true
+  if find_worktree_by_branch "$root" "$branch" >/dev/null; then
+    archive_delete_refs "$root" "$branch"
+    die "failed to remove workspace for archive: '$branch'"
+  fi
+  printf '%s\n' "$path"
+}
+
+cmd_unarchive() {
+  local branch="" path_override=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    -h | --help)
+      unarchive_usage
+      exit 0
+      ;;
+    --path)
+      [ -n "${2:-}" ] || die "missing value for --path"
+      path_override="$2"
+      shift
+      ;;
+    --path=*) path_override="${1#--path=}" ;;
+    --*) die "unknown flag '$1'" ;;
+    *) if [ -z "$branch" ]; then branch="$1"; else die "unexpected argument '$1'"; fi ;;
+    esac
+    shift
+  done
+  [ -n "$branch" ] || die "missing branch"
+  require_repo
+  local root
+  root=$(main_worktree_path)
+  if ! archive_has_any_refs "$root" "$branch"; then
+    die "archive not found: '$branch'"
+  fi
+  if ! archive_refs_complete "$root" "$branch"; then
+    die "archive metadata incomplete for '$branch'"
+  fi
+  read_archive_metadata "$root" "$branch"
+  local index_tree worktree_tree
+  if ! index_tree=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$branch")^{tree}" 2>/dev/null); then
+    die "archive index tree missing for '$branch'"
+  fi
+  if ! worktree_tree=$(git -C "$root" rev-parse --verify "$(archive_worktree_ref "$branch")^{tree}" 2>/dev/null); then
+    die "archive worktree tree missing for '$branch'"
+  fi
+  local target_branch branch_created=0
+  target_branch=$(choose_unarchive_branch "$root" "$branch" "$ARCHIVE_META_HEAD_COMMIT")
+  if ! git -C "$root" show-ref --verify --quiet "refs/heads/$target_branch"; then
+    git -C "$root" branch "$target_branch" "$ARCHIVE_META_HEAD_COMMIT" >/dev/null
+    branch_created=1
+  fi
+  local preferred_path target_path
+  if [ -n "$path_override" ]; then
+    preferred_path=$(resolve_path "$root" "$path_override")
+  else
+    preferred_path=$(normalize_dir "$ARCHIVE_META_WORKTREE_PATH")
+  fi
+  target_path=$(choose_unarchive_path "$root" "$preferred_path")
+  mkdir -p "$(dirname "$target_path")"
+  if ! git -C "$root" worktree add "$target_path" "$target_branch" >/dev/null; then
+    if [ "$branch_created" = "1" ]; then
+      git -C "$root" branch -D "$target_branch" >/dev/null 2>&1 || true
+    fi
+    die "failed to recreate workspace for '$branch'"
+  fi
+  if ! restore_archive_state "$target_path" "$worktree_tree" "$index_tree"; then
+    cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"
+    die "failed to restore archive for '$branch'"
+  fi
+  if ! run_post_switch_hook "$target_branch" "$target_path"; then
+    cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"
+    die "post-switch hook failed"
+  fi
+  archive_delete_refs "$root" "$branch"
+  printf '%s\n' "$target_path"
+}
+
 cmd_merge() {
   local target="" squash=1 rebase=1 commit=1
   while [ "$#" -gt 0 ]; do
@@ -1239,13 +1591,13 @@ cmd_root() {
 
 completion_bash() {
   local commands
-  commands="switch sw exec sync ls rm merge here base root help completion"
+  commands="switch sw exec sync ls archive unarchive rm merge here base root help completion"
   cat <<EOF
 command -v wt >/dev/null 2>&1 || return 0
 
 wt() {
   case "\$1" in
-    switch|sw)
+    switch|sw|unarchive)
       local i
       for i in "\$@"; do
         case "\$i" in
@@ -1278,6 +1630,11 @@ wt() {
 __wt_branches() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
   git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
+}
+
+__wt_archived_branches() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null | sed -n 's#^refs/wt/archive/##; s#/meta\$##p'
 }
 
 _wt_complete() {
@@ -1347,6 +1704,17 @@ _wt_complete() {
       flags="--copy-all --copy-ignored --copy-untracked --copy-modified -f --force -v --verbose -n --dry-run -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
       ;;
+    archive)
+      flags="-h --help"
+      COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
+      ;;
+    unarchive)
+      flags="--path -h --help"
+      case "\$prev" in
+        --path) return 0 ;;
+      esac
+      COMPREPLY=( \$(compgen -W "\$flags \$(__wt_archived_branches)" -- "\$cur") )
+      ;;
     rm)
       flags="-f --force -h --help"
       COMPREPLY=( \$(compgen -W "\$flags \$(__wt_branches)" -- "\$cur") )
@@ -1364,7 +1732,7 @@ _wt_complete() {
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     help)
-      flags="switch sw exec sync ls rm merge here base root help completion"
+      flags="switch sw exec sync ls archive unarchive rm merge here base root help completion"
       COMPREPLY=( \$(compgen -W "\$flags" -- "\$cur") )
       ;;
     completion)
@@ -1384,7 +1752,7 @@ command -v wt >/dev/null 2>&1 || return 0
 
 wt() {
   case "\$1" in
-    switch|sw)
+    switch|sw|unarchive)
       local i
       for i in "\$@"; do
         case "\$i" in
@@ -1419,15 +1787,22 @@ __wt_branches() {
   git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
 }
 
+__wt_archived_branches() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null | sed -n 's#^refs/wt/archive/##; s#/meta\$##p'
+}
+
 _wt() {
-  local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs sync_flags sync_descs ls_flags ls_descs rm_flags rm_descs merge_flags merge_descs hb_flags hb_descs global_flags global_descs
-  subcmds=(switch sw exec sync ls rm merge here base root help completion)
+  local -a subcmds subdescs switch_flags switch_descs exec_flags exec_descs sync_flags sync_descs ls_flags ls_descs archive_flags archive_descs unarchive_flags unarchive_descs rm_flags rm_descs merge_flags merge_descs hb_flags hb_descs global_flags global_descs
+  subcmds=(switch sw exec sync ls archive unarchive rm merge here base root help completion)
   subdescs=(
     "create or open a workspace"
     "alias for switch"
     "open a workspace and run a command"
     "copy files between worktrees"
     "list workspaces"
+    "save workspace state and remove worktree"
+    "restore workspace from archive"
     "remove a workspace"
     "squash, rebase, and merge to target"
     "print current workspace branch"
@@ -1446,6 +1821,10 @@ _wt() {
   sync_descs=("copy all files" "copy gitignored files" "copy untracked files" "copy modified files" "overwrite existing destination files" "overwrite existing destination files" "print copy progress" "print copy progress" "show files that would be copied" "show files that would be copied" "show help" "show help")
   ls_flags=(--plain --json -h --help)
   ls_descs=("tab-delimited output" "JSON output" "show help" "show help")
+  archive_flags=(-h --help)
+  archive_descs=("show help" "show help")
+  unarchive_flags=(--path -h --help)
+  unarchive_descs=("explicit worktree path" "show help" "show help")
   rm_flags=(-f --force -h --help)
   rm_descs=("remove even if dirty" "remove even if dirty" "show help" "show help")
   merge_flags=(--no-squash --no-rebase --no-commit -h --help)
@@ -1513,6 +1892,19 @@ _wt() {
       compadd -- \${(f)"\$(__wt_branches)"}
       return 0
       ;;
+    archive)
+      compadd -d archive_descs -- \$archive_flags
+      compadd -- \${(f)"\$(__wt_branches)"}
+      return 0
+      ;;
+    unarchive)
+      if [[ "\${words[CURRENT-1]}" == --path ]]; then
+        return 0
+      fi
+      compadd -d unarchive_descs -- \$unarchive_flags
+      compadd -- \${(f)"\$(__wt_archived_branches)"}
+      return 0
+      ;;
     rm)
       compadd -d rm_descs -- \$rm_flags
       compadd -- \${(f)"\$(__wt_branches)"}
@@ -1561,7 +1953,7 @@ EOF
   printf "set -g __wt_bin '%s'\n\n" "$wt_bin_escaped"
   cat <<'EOF'
 function wt
-  if test "$argv[1]" = "switch" -o "$argv[1]" = "sw"
+  if test "$argv[1]" = "switch" -o "$argv[1]" = "sw" -o "$argv[1]" = "unarchive"
     if contains -- -h $argv; or contains -- --help $argv
       command "$__wt_bin" $argv
       return $status
@@ -1595,6 +1987,12 @@ function __wt_branches
   command git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
 end
 
+function __wt_archived_branches
+  command git rev-parse --git-dir >/dev/null 2>&1
+  or return
+  command git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null | sed -n 's#^refs/wt/archive/##; s#/meta$##p'
+end
+
 complete -c wt -f
 complete -c wt -l base-dir -r -d 'base dir override'
 complete -c wt -s h -l help -d 'show help'
@@ -1603,6 +2001,8 @@ complete -c wt -n '__fish_use_subcommand' -a sw -d 'alias for switch'
 complete -c wt -n '__fish_use_subcommand' -a exec -d 'open a workspace and run a command'
 complete -c wt -n '__fish_use_subcommand' -a sync -d 'copy files between worktrees'
 complete -c wt -n '__fish_use_subcommand' -a ls -d 'list workspaces'
+complete -c wt -n '__fish_use_subcommand' -a archive -d 'save workspace state and remove worktree'
+complete -c wt -n '__fish_use_subcommand' -a unarchive -d 'restore workspace from archive'
 complete -c wt -n '__fish_use_subcommand' -a rm -d 'remove a workspace'
 complete -c wt -n '__fish_use_subcommand' -a merge -d 'squash, rebase, and merge to target'
 complete -c wt -n '__fish_use_subcommand' -a here -d 'print current workspace branch'
@@ -1610,7 +2010,8 @@ complete -c wt -n '__fish_use_subcommand' -a base -d 'print base dir'
 complete -c wt -n '__fish_use_subcommand' -a root -d 'print main worktree path'
 complete -c wt -n '__fish_use_subcommand' -a help -d 'show help'
 complete -c wt -n '__fish_use_subcommand' -a completion -d 'print shell completion'
-complete -c wt -n '__fish_seen_subcommand_from switch sw exec sync rm merge' -a '(__wt_branches)'
+complete -c wt -n '__fish_seen_subcommand_from switch sw exec sync archive rm merge' -a '(__wt_branches)'
+complete -c wt -n '__fish_seen_subcommand_from unarchive' -a '(__wt_archived_branches)'
 
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l from -r -d 'base ref for new branch'
 complete -c wt -n '__fish_seen_subcommand_from switch sw exec' -l path -r -d 'explicit worktree path'
@@ -1635,6 +2036,11 @@ complete -c wt -n '__fish_seen_subcommand_from ls' -l plain -d 'tab-delimited ou
 complete -c wt -n '__fish_seen_subcommand_from ls' -l json -d 'JSON output'
 complete -c wt -n '__fish_seen_subcommand_from ls' -s h -l help -d 'show help'
 
+complete -c wt -n '__fish_seen_subcommand_from archive' -s h -l help -d 'show help'
+
+complete -c wt -n '__fish_seen_subcommand_from unarchive' -l path -r -d 'explicit worktree path'
+complete -c wt -n '__fish_seen_subcommand_from unarchive' -s h -l help -d 'show help'
+
 complete -c wt -n '__fish_seen_subcommand_from rm' -s f -l force -d 'remove even if dirty'
 complete -c wt -n '__fish_seen_subcommand_from rm' -s h -l help -d 'show help'
 
@@ -1648,6 +2054,8 @@ complete -c wt -n '__fish_seen_subcommand_from help' -a sw -d 'alias for switch'
 complete -c wt -n '__fish_seen_subcommand_from help' -a exec -d 'open a workspace and run a command'
 complete -c wt -n '__fish_seen_subcommand_from help' -a sync -d 'copy files between worktrees'
 complete -c wt -n '__fish_seen_subcommand_from help' -a ls -d 'list workspaces'
+complete -c wt -n '__fish_seen_subcommand_from help' -a archive -d 'save workspace state and remove worktree'
+complete -c wt -n '__fish_seen_subcommand_from help' -a unarchive -d 'restore workspace from archive'
 complete -c wt -n '__fish_seen_subcommand_from help' -a rm -d 'remove a workspace'
 complete -c wt -n '__fish_seen_subcommand_from help' -a merge -d 'squash, rebase, and merge to target'
 complete -c wt -n '__fish_seen_subcommand_from help' -a here -d 'print current workspace branch'
@@ -1682,6 +2090,8 @@ cmd_help() {
   exec) exec_usage ;;
   sync) sync_usage ;;
   ls) ls_usage ;;
+  archive) archive_usage ;;
+  unarchive) unarchive_usage ;;
   rm) rm_usage ;;
   merge) merge_usage ;;
   here) here_usage ;;
@@ -1744,6 +2154,14 @@ sync)
 ls)
   shift
   cmd_ls "$@"
+  ;;
+archive)
+  shift
+  cmd_archive "$@"
+  ;;
+unarchive)
+  shift
+  cmd_unarchive "$@"
   ;;
 rm)
   shift
