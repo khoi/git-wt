@@ -396,24 +396,40 @@ find_worktree_by_path() {
   return 1
 }
 
+archive_branch_key() {
+  local root="$1"
+  local branch="$2"
+  printf '%s' "$branch" | git -C "$root" hash-object --stdin
+}
+
 archive_ref_prefix() {
-  local branch="$1"
-  printf 'refs/wt/archive/%s\n' "$branch"
+  local root="$1"
+  local branch="$2"
+  printf 'refs/wt/archive/%s\n' "$(archive_branch_key "$root" "$branch")"
 }
 
 archive_meta_ref() {
-  local branch="$1"
-  printf '%s/meta\n' "$(archive_ref_prefix "$branch")"
+  local root="$1"
+  local branch="$2"
+  printf '%s/meta\n' "$(archive_ref_prefix "$root" "$branch")"
 }
 
 archive_index_ref() {
-  local branch="$1"
-  printf '%s/index\n' "$(archive_ref_prefix "$branch")"
+  local root="$1"
+  local branch="$2"
+  printf '%s/index\n' "$(archive_ref_prefix "$root" "$branch")"
 }
 
 archive_worktree_ref() {
-  local branch="$1"
-  printf '%s/worktree\n' "$(archive_ref_prefix "$branch")"
+  local root="$1"
+  local branch="$2"
+  printf '%s/worktree\n' "$(archive_ref_prefix "$root" "$branch")"
+}
+
+archive_head_ref() {
+  local root="$1"
+  local branch="$2"
+  printf '%s/head\n' "$(archive_ref_prefix "$root" "$branch")"
 }
 
 archive_entries() {
@@ -454,7 +470,7 @@ archive_has_any_refs() {
   local root="$1"
   local branch="$2"
   local ref
-  for ref in "$(archive_meta_ref "$branch")" "$(archive_index_ref "$branch")" "$(archive_worktree_ref "$branch")"; do
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
     if git -C "$root" show-ref --verify --quiet "$ref"; then
       return 0
     fi
@@ -465,17 +481,19 @@ archive_has_any_refs() {
 archive_refs_complete() {
   local root="$1"
   local branch="$2"
-  git -C "$root" show-ref --verify --quiet "$(archive_meta_ref "$branch")" &&
-    git -C "$root" show-ref --verify --quiet "$(archive_index_ref "$branch")" &&
-    git -C "$root" show-ref --verify --quiet "$(archive_worktree_ref "$branch")"
+  git -C "$root" show-ref --verify --quiet "$(archive_meta_ref "$root" "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_index_ref "$root" "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_worktree_ref "$root" "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_head_ref "$root" "$branch")"
 }
 
 archive_delete_refs() {
   local root="$1"
   local branch="$2"
-  git -C "$root" update-ref -d "$(archive_meta_ref "$branch")" 2>/dev/null || true
-  git -C "$root" update-ref -d "$(archive_index_ref "$branch")" 2>/dev/null || true
-  git -C "$root" update-ref -d "$(archive_worktree_ref "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_meta_ref "$root" "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_index_ref "$root" "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_worktree_ref "$root" "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_head_ref "$root" "$branch")" 2>/dev/null || true
 }
 
 utc_now() {
@@ -493,7 +511,7 @@ write_archive_metadata() {
   meta_oid=$(printf 'version=1\nbranch=%s\nhead_commit=%s\nworktree_path=%s\nbase_dir=%s\narchived_at=%s\n' \
     "$branch" "$head_commit" "$worktree_path" "$base" "$archived_at" |
     git -C "$root" hash-object -w --stdin)
-  git -C "$root" update-ref "$(archive_meta_ref "$branch")" "$meta_oid"
+  git -C "$root" update-ref "$(archive_meta_ref "$root" "$branch")" "$meta_oid"
 }
 
 ARCHIVE_META_VERSION=""
@@ -507,7 +525,7 @@ read_archive_metadata() {
   local root="$1"
   local branch="$2"
   local content
-  if ! content=$(git -C "$root" cat-file -p "$(archive_meta_ref "$branch")" 2>/dev/null); then
+  if ! content=$(git -C "$root" cat-file -p "$(archive_meta_ref "$root" "$branch")" 2>/dev/null); then
     die "archive not found: '$branch'"
   fi
   ARCHIVE_META_VERSION=""
@@ -560,27 +578,48 @@ choose_unarchive_branch() {
   local root="$1"
   local branch="$2"
   local archived_head="$3"
-  if ! git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
-    printf '%s\n' "$branch"
-    return
-  fi
-  local branch_taken=0
-  if find_worktree_by_branch "$root" "$branch" >/dev/null; then
-    branch_taken=1
-  fi
-  local current_head
-  current_head=$(git -C "$root" rev-parse --verify "refs/heads/$branch")
-  if [ "$branch_taken" -eq 0 ] && [ "$current_head" = "$archived_head" ]; then
+  if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
+    local branch_taken=0
+    if find_worktree_by_branch "$root" "$branch" >/dev/null; then
+      branch_taken=1
+    fi
+    local current_head
+    current_head=$(git -C "$root" rev-parse --verify "refs/heads/$branch")
+    if [ "$branch_taken" -eq 0 ] && [ "$current_head" = "$archived_head" ]; then
+      printf '%s\n' "$branch"
+      return
+    fi
+  elif branch_ref_available "$root" "$branch"; then
     printf '%s\n' "$branch"
     return
   fi
   local candidate="${branch}-restored"
   local n=2
-  while git -C "$root" show-ref --verify --quiet "refs/heads/$candidate"; do
+  while ! branch_ref_available "$root" "$candidate"; do
     candidate="${branch}-restored-$n"
     n=$((n + 1))
   done
   printf '%s\n' "$candidate"
+}
+
+branch_ref_available() {
+  local root="$1"
+  local branch="$2"
+  local ref="refs/heads/$branch"
+  if git -C "$root" show-ref --verify --quiet "$ref"; then
+    return 1
+  fi
+  if git -C "$root" for-each-ref --format='%(refname)' "$ref/" | grep -q .; then
+    return 1
+  fi
+  local prefix="$branch"
+  while [[ "$prefix" == */* ]]; do
+    prefix="${prefix%/*}"
+    if git -C "$root" show-ref --verify --quiet "refs/heads/$prefix"; then
+      return 1
+    fi
+  done
+  return 0
 }
 
 path_taken() {
@@ -1484,8 +1523,9 @@ cmd_archive() {
   fi
   capture_archive_trees "$path"
   archived_at=$(utc_now)
-  git -C "$root" update-ref "$(archive_index_ref "$branch")" "$ARCHIVE_CAPTURE_INDEX_TREE"
-  git -C "$root" update-ref "$(archive_worktree_ref "$branch")" "$ARCHIVE_CAPTURE_WORKTREE_TREE"
+  git -C "$root" update-ref "$(archive_index_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_TREE"
+  git -C "$root" update-ref "$(archive_worktree_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_WORKTREE_TREE"
+  git -C "$root" update-ref "$(archive_head_ref "$root" "$branch")" "$head_commit"
   write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at"
   git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
   command rm -rf "$path" 2>/dev/null || true
@@ -1528,16 +1568,23 @@ cmd_unarchive() {
   fi
   read_archive_metadata "$root" "$branch"
   local index_tree worktree_tree
-  if ! index_tree=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$branch")^{tree}" 2>/dev/null); then
+  if ! index_tree=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$root" "$branch")^{tree}" 2>/dev/null); then
     die "archive index tree missing for '$branch'"
   fi
-  if ! worktree_tree=$(git -C "$root" rev-parse --verify "$(archive_worktree_ref "$branch")^{tree}" 2>/dev/null); then
+  if ! worktree_tree=$(git -C "$root" rev-parse --verify "$(archive_worktree_ref "$root" "$branch")^{tree}" 2>/dev/null); then
     die "archive worktree tree missing for '$branch'"
   fi
+  local archived_head
+  if ! archived_head=$(git -C "$root" rev-parse --verify "$(archive_head_ref "$root" "$branch")^{commit}" 2>/dev/null); then
+    die "archive head commit missing for '$branch'"
+  fi
+  if [ -n "$ARCHIVE_META_HEAD_COMMIT" ] && [ "$ARCHIVE_META_HEAD_COMMIT" != "$archived_head" ]; then
+    die "archive metadata mismatch for '$branch'"
+  fi
   local target_branch branch_created=0
-  target_branch=$(choose_unarchive_branch "$root" "$branch" "$ARCHIVE_META_HEAD_COMMIT")
+  target_branch=$(choose_unarchive_branch "$root" "$branch" "$archived_head")
   if ! git -C "$root" show-ref --verify --quiet "refs/heads/$target_branch"; then
-    git -C "$root" branch "$target_branch" "$ARCHIVE_META_HEAD_COMMIT" >/dev/null
+    git -C "$root" branch "$target_branch" "$archived_head" >/dev/null
     branch_created=1
   fi
   local preferred_path target_path
@@ -1736,7 +1783,11 @@ __wt_branches() {
 
 __wt_archived_branches() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
-  git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null | sed -n 's#^refs/wt/archive/##; s#/meta\$##p'
+  git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null |
+    sed -n '/\/meta$/p' |
+    while IFS= read -r ref; do
+      git cat-file -p "\$ref" 2>/dev/null | sed -n 's/^branch=//p' | head -n 1
+    done | sed '/^$/d' | sort -u
 }
 
 _wt_complete() {
@@ -1891,7 +1942,11 @@ __wt_branches() {
 
 __wt_archived_branches() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
-  git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null | sed -n 's#^refs/wt/archive/##; s#/meta\$##p'
+  git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null |
+    sed -n '/\/meta$/p' |
+    while IFS= read -r ref; do
+      git cat-file -p "\$ref" 2>/dev/null | sed -n 's/^branch=//p' | head -n 1
+    done | sed '/^$/d' | sort -u
 }
 
 _wt() {
@@ -2092,7 +2147,11 @@ end
 function __wt_archived_branches
   command git rev-parse --git-dir >/dev/null 2>&1
   or return
-  command git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null | sed -n 's#^refs/wt/archive/##; s#/meta$##p'
+  command git for-each-ref --format='%(refname)' refs/wt/archive 2>/dev/null |
+    sed -n '/\/meta$/p' |
+    while read -l ref
+      command git cat-file -p "$ref" 2>/dev/null | sed -n 's/^branch=//p' | head -n 1
+    end | sed '/^$/d' | sort -u
 end
 
 complete -c wt -f

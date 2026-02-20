@@ -25,17 +25,23 @@ printf 'ignored file\n' > "$path/ignored.tmp"
 "$WT_BIN" archive feat-archive >/dev/null
 [ ! -d "$path" ] || fail "worktree path still exists"
 
+archive_key=$(printf 'feat-archive' | git -C "$repo" hash-object --stdin)
+archive_prefix="refs/wt/archive/$archive_key"
+
 if ! git -C "$repo" show-ref --verify --quiet refs/heads/feat-archive; then
   fail "branch missing after archive"
 fi
-if ! git -C "$repo" show-ref --verify --quiet refs/wt/archive/feat-archive/meta; then
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/meta"; then
   fail "archive metadata ref missing"
 fi
-if ! git -C "$repo" show-ref --verify --quiet refs/wt/archive/feat-archive/index; then
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/index"; then
   fail "archive index ref missing"
 fi
-if ! git -C "$repo" show-ref --verify --quiet refs/wt/archive/feat-archive/worktree; then
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/worktree"; then
   fail "archive worktree ref missing"
+fi
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/head"; then
+  fail "archive head ref missing"
 fi
 
 restored=$("$WT_BIN" unarchive feat-archive)
@@ -49,12 +55,15 @@ assert_match "?? untracked.txt" "$status"
 assert_not_match "ignored.tmp" "$status"
 [ ! -e "$restored/ignored.tmp" ] || fail "ignored file restored"
 
-if git -C "$repo" show-ref --verify --quiet refs/wt/archive/feat-archive/meta; then
+if git -C "$repo" show-ref --verify --quiet "$archive_prefix/meta"; then
   fail "archive metadata ref still exists"
 fi
-if git -C "$repo" show-ref --verify --quiet refs/wt/archive/feat-archive/index; then
+if git -C "$repo" show-ref --verify --quiet "$archive_prefix/index"; then
   fail "archive index ref still exists"
 fi
-if git -C "$repo" show-ref --verify --quiet refs/wt/archive/feat-archive/worktree; then
+if git -C "$repo" show-ref --verify --quiet "$archive_prefix/worktree"; then
   fail "archive worktree ref still exists"
+fi
+if git -C "$repo" show-ref --verify --quiet "$archive_prefix/head"; then
+  fail "archive head ref still exists"
 fi
