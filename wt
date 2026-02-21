@@ -498,11 +498,18 @@ archive_refs_complete() {
 archive_delete_refs() {
   local root="$1"
   local branch="$2"
-  git -C "$root" update-ref -d "$(archive_meta_ref "$root" "$branch")" 2>/dev/null || true
-  git -C "$root" update-ref -d "$(archive_index_ref "$root" "$branch")" 2>/dev/null || true
-  git -C "$root" update-ref -d "$(archive_index_keepalive_ref "$root" "$branch")" 2>/dev/null || true
-  git -C "$root" update-ref -d "$(archive_worktree_ref "$root" "$branch")" 2>/dev/null || true
-  git -C "$root" update-ref -d "$(archive_head_ref "$root" "$branch")" 2>/dev/null || true
+  ARCHIVE_DELETE_FAILED_REF=""
+  local ref
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
+    if git -C "$root" update-ref -d "$ref" >/dev/null 2>&1; then
+      continue
+    fi
+    if git -C "$root" show-ref --verify --quiet "$ref"; then
+      ARCHIVE_DELETE_FAILED_REF="$ref"
+      return 1
+    fi
+  done
+  return 0
 }
 
 utc_now() {
@@ -587,11 +594,7 @@ capture_archive_index_keepalive_tree() {
 
 capture_archive_trees() {
   local path="$1"
-  local index_path
-  if ! index_path=$(git -C "$path" rev-parse --git-path index); then
-    die "failed to capture archive state"
-  fi
-  if ! ARCHIVE_CAPTURE_INDEX_BLOB=$(git -C "$path" hash-object -w "$index_path"); then
+  if ! ARCHIVE_CAPTURE_INDEX_BLOB=$(git -C "$path" ls-files --stage | git -C "$path" hash-object -w --stdin); then
     die "failed to capture archive state"
   fi
   if ! ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE=$(capture_archive_index_keepalive_tree "$path"); then
@@ -737,10 +740,13 @@ restore_archive_state() {
   if ! index_path=$(git -C "$path" rev-parse --git-path index); then
     return 1
   fi
-  if ! git -C "$path" read-tree --reset -u "$worktree_tree"; then
+  if ! git -C "$path" read-tree --reset -u --no-recurse-submodules "$worktree_tree"; then
     return 1
   fi
-  if ! git -C "$path" cat-file blob "$index_blob" >"$index_path"; then
+  if ! GIT_INDEX_FILE="$index_path" git -C "$path" read-tree --empty >/dev/null; then
+    return 1
+  fi
+  if ! git -C "$path" cat-file blob "$index_blob" | GIT_INDEX_FILE="$index_path" git -C "$path" update-index --index-info; then
     return 1
   fi
 }
@@ -1676,19 +1682,22 @@ cmd_unarchive() {
   if [ -n "$ARCHIVE_META_HEAD_COMMIT" ] && [ "$ARCHIVE_META_HEAD_COMMIT" != "$archived_head" ]; then
     die "archive metadata mismatch for '$branch'"
   fi
+  local preferred_path target_path
+  if [ -n "$path_override" ]; then
+    target_path=$(resolve_path "$root" "$path_override")
+    if path_taken "$root" "$target_path"; then
+      die "worktree path already in use: '$target_path'"
+    fi
+  else
+    preferred_path=$(normalize_dir "$ARCHIVE_META_WORKTREE_PATH")
+    target_path=$(choose_unarchive_path "$root" "$preferred_path")
+  fi
   local target_branch branch_created=0
   target_branch=$(choose_unarchive_branch "$root" "$branch" "$archived_head")
   if ! git -C "$root" show-ref --verify --quiet "refs/heads/$target_branch"; then
     git -C "$root" branch "$target_branch" "$archived_head" >/dev/null
     branch_created=1
   fi
-  local preferred_path target_path
-  if [ -n "$path_override" ]; then
-    preferred_path=$(resolve_path "$root" "$path_override")
-  else
-    preferred_path=$(normalize_dir "$ARCHIVE_META_WORKTREE_PATH")
-  fi
-  target_path=$(choose_unarchive_path "$root" "$preferred_path")
   if ! mkdir -p "$(dirname "$target_path")"; then
     if [ "$branch_created" = "1" ]; then
       git -C "$root" branch -D "$target_branch" >/dev/null 2>&1 || true
@@ -1709,7 +1718,10 @@ cmd_unarchive() {
     cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"
     die "post-switch hook failed"
   fi
-  archive_delete_refs "$root" "$branch"
+  if ! archive_delete_refs "$root" "$branch"; then
+    cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"
+    die "failed to clear archive refs for '$branch': '$ARCHIVE_DELETE_FAILED_REF'"
+  fi
   printf '%s\n' "$target_path"
 }
 
