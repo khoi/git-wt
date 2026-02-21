@@ -37,6 +37,9 @@ fi
 if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/index"; then
   fail "archive index ref missing"
 fi
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/index-keepalive"; then
+  fail "archive index keepalive ref missing"
+fi
 if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/worktree"; then
   fail "archive worktree ref missing"
 fi
@@ -60,6 +63,9 @@ if git -C "$repo" show-ref --verify --quiet "$archive_prefix/meta"; then
 fi
 if git -C "$repo" show-ref --verify --quiet "$archive_prefix/index"; then
   fail "archive index ref still exists"
+fi
+if git -C "$repo" show-ref --verify --quiet "$archive_prefix/index-keepalive"; then
+  fail "archive index keepalive ref still exists"
 fi
 if git -C "$repo" show-ref --verify --quiet "$archive_prefix/worktree"; then
   fail "archive worktree ref still exists"

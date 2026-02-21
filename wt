@@ -421,6 +421,12 @@ archive_index_ref() {
   printf '%s/index\n' "$(archive_ref_prefix "$root" "$branch")"
 }
 
+archive_index_keepalive_ref() {
+  local root="$1"
+  local branch="$2"
+  printf '%s/index-keepalive\n' "$(archive_ref_prefix "$root" "$branch")"
+}
+
 archive_worktree_ref() {
   local root="$1"
   local branch="$2"
@@ -471,7 +477,7 @@ archive_has_any_refs() {
   local root="$1"
   local branch="$2"
   local ref
-  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
     if git -C "$root" show-ref --verify --quiet "$ref"; then
       return 0
     fi
@@ -484,6 +490,7 @@ archive_refs_complete() {
   local branch="$2"
   git -C "$root" show-ref --verify --quiet "$(archive_meta_ref "$root" "$branch")" &&
     git -C "$root" show-ref --verify --quiet "$(archive_index_ref "$root" "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_index_keepalive_ref "$root" "$branch")" &&
     git -C "$root" show-ref --verify --quiet "$(archive_worktree_ref "$root" "$branch")" &&
     git -C "$root" show-ref --verify --quiet "$(archive_head_ref "$root" "$branch")"
 }
@@ -493,6 +500,7 @@ archive_delete_refs() {
   local branch="$2"
   git -C "$root" update-ref -d "$(archive_meta_ref "$root" "$branch")" 2>/dev/null || true
   git -C "$root" update-ref -d "$(archive_index_ref "$root" "$branch")" 2>/dev/null || true
+  git -C "$root" update-ref -d "$(archive_index_keepalive_ref "$root" "$branch")" 2>/dev/null || true
   git -C "$root" update-ref -d "$(archive_worktree_ref "$root" "$branch")" 2>/dev/null || true
   git -C "$root" update-ref -d "$(archive_head_ref "$root" "$branch")" 2>/dev/null || true
 }
@@ -555,6 +563,28 @@ read_archive_metadata() {
   [ -n "$ARCHIVE_META_WORKTREE_PATH" ] || die "archive metadata missing worktree_path for '$branch'"
 }
 
+capture_archive_index_keepalive_tree() {
+  local path="$1"
+  local tmp_index
+  tmp_index=$(mktemp)
+  rm -f "$tmp_index"
+  local oid
+  while IFS= read -r oid; do
+    [ -n "$oid" ] || continue
+    if ! GIT_INDEX_FILE="$tmp_index" git -C "$path" update-index --add --cacheinfo 100644 "$oid" "__wt-archive/$oid" >/dev/null; then
+      rm -f "$tmp_index"
+      return 1
+    fi
+  done < <(git -C "$path" ls-files --stage | awk '$1 != "160000" {print $2}' | sort -u)
+  local tree
+  if ! tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$path" write-tree); then
+    rm -f "$tmp_index"
+    return 1
+  fi
+  rm -f "$tmp_index"
+  printf '%s\n' "$tree"
+}
+
 capture_archive_trees() {
   local path="$1"
   local index_path
@@ -562,6 +592,9 @@ capture_archive_trees() {
     die "failed to capture archive state"
   fi
   if ! ARCHIVE_CAPTURE_INDEX_BLOB=$(git -C "$path" hash-object -w "$index_path"); then
+    die "failed to capture archive state"
+  fi
+  if ! ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE=$(capture_archive_index_keepalive_tree "$path"); then
     die "failed to capture archive state"
   fi
   local tmp_index
@@ -1583,16 +1616,16 @@ cmd_archive() {
   capture_archive_trees "$path"
   archived_at=$(utc_now)
   git -C "$root" update-ref "$(archive_index_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_BLOB"
+  git -C "$root" update-ref "$(archive_index_keepalive_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE"
   git -C "$root" update-ref "$(archive_worktree_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_WORKTREE_TREE"
   git -C "$root" update-ref "$(archive_head_ref "$root" "$branch")" "$head_commit"
   write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at"
   git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
-  command rm -rf "$path" 2>/dev/null || true
   git -C "$root" worktree prune >/dev/null 2>&1 || true
   if find_worktree_by_branch "$root" "$branch" >/dev/null; then
-    archive_delete_refs "$root" "$branch"
     die "failed to remove workspace for archive: '$branch'"
   fi
+  command rm -rf "$path" 2>/dev/null || true
   printf '%s\n' "$path"
 }
 
@@ -1629,6 +1662,9 @@ cmd_unarchive() {
   local index_blob worktree_tree
   if ! index_blob=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$root" "$branch")^{blob}" 2>/dev/null); then
     die "archive index blob missing for '$branch'"
+  fi
+  if ! git -C "$root" rev-parse --verify "$(archive_index_keepalive_ref "$root" "$branch")^{tree}" >/dev/null 2>&1; then
+    die "archive index keepalive tree missing for '$branch'"
   fi
   if ! worktree_tree=$(git -C "$root" rev-parse --verify "$(archive_worktree_ref "$root" "$branch")^{tree}" 2>/dev/null); then
     die "archive worktree tree missing for '$branch'"
