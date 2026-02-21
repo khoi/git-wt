@@ -169,6 +169,7 @@ die() {
 }
 
 BASE_DIR_OVERRIDE=""
+OPEN_PATH_RESULT=""
 
 require_repo() {
   local err
@@ -556,7 +557,13 @@ read_archive_metadata() {
 
 capture_archive_trees() {
   local path="$1"
-  ARCHIVE_CAPTURE_INDEX_TREE=$(git -C "$path" write-tree)
+  local index_path
+  if ! index_path=$(git -C "$path" rev-parse --git-path index); then
+    die "failed to capture archive state"
+  fi
+  if ! ARCHIVE_CAPTURE_INDEX_BLOB=$(git -C "$path" hash-object -w "$index_path"); then
+    die "failed to capture archive state"
+  fi
   local tmp_index
   tmp_index=$(mktemp)
   if ! GIT_INDEX_FILE="$tmp_index" git -C "$path" read-tree HEAD >/dev/null; then
@@ -692,9 +699,17 @@ choose_unarchive_path() {
 restore_archive_state() {
   local path="$1"
   local worktree_tree="$2"
-  local index_tree="$3"
-  git -C "$path" read-tree --reset -u "$worktree_tree"
-  git -C "$path" read-tree --reset "$index_tree"
+  local index_blob="$3"
+  local index_path
+  if ! index_path=$(git -C "$path" rev-parse --git-path index); then
+    return 1
+  fi
+  if ! git -C "$path" read-tree --reset -u "$worktree_tree"; then
+    return 1
+  fi
+  if ! git -C "$path" cat-file blob "$index_blob" >"$index_path"; then
+    return 1
+  fi
 }
 
 run_post_switch_hook() {
@@ -1112,6 +1127,7 @@ open_path() {
   local copytracked="${9:-0}"
   local force="${10:-0}"
   local verbose="${11:-0}"
+  OPEN_PATH_RESULT=""
   require_repo
   local root base path copy_src
   root=$(main_worktree_path)
@@ -1127,7 +1143,7 @@ open_path() {
   fi
   local existing
   if existing=$(find_worktree_by_branch "$root" "$branch"); then
-    printf '%s\n' "$existing"
+    OPEN_PATH_RESULT="$existing"
     return 0
   fi
   if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -1140,7 +1156,7 @@ open_path() {
     mkdir -p "$(dirname "$path")"
     git -C "$root" worktree add "$path" "$branch" >/dev/null
     copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$verbose"
-    printf '%s\n' "$path"
+    OPEN_PATH_RESULT="$path"
     return 0
   fi
   if [ "$fetch" -eq 1 ]; then
@@ -1155,7 +1171,7 @@ open_path() {
   mkdir -p "$(dirname "$path")"
   git -C "$root" worktree add -b "$branch" "$path" "$from" >/dev/null
   copy_files_to_worktree "$copy_src" "$path" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$verbose"
-  printf '%s\n' "$path"
+  OPEN_PATH_RESULT="$path"
 }
 
 cmd_switch() {
@@ -1193,7 +1209,9 @@ cmd_switch() {
   done
   [ -n "$branch" ] || die "missing branch"
   local path
-  path=$(open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$verbose")
+  open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch" "$copyignored" "$copyuntracked" "$copymodified" "$copytracked" "$force" "$verbose"
+  path="$OPEN_PATH_RESULT"
+  [ -n "$path" ] || die "failed to open workspace for '$branch'"
   if ! run_post_switch_hook "$branch" "$path"; then
     die "post-switch hook failed"
   fi
@@ -1236,7 +1254,9 @@ cmd_exec() {
   [ -n "$branch" ] || die "missing branch"
   [ "$#" -gt 0 ] || die "missing command"
   local path
-  path=$(open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch")
+  open_path "$branch" "$from" "$BASE_DIR_OVERRIDE" "$path_override" "$fetch"
+  path="$OPEN_PATH_RESULT"
+  [ -n "$path" ] || die "failed to open workspace for '$branch'"
   cd "$path"
   exec "$@"
 }
@@ -1353,12 +1373,12 @@ cmd_ls() {
       local path head branch is_bare
       parse_worktree_entry "$entry"
       if [ "$is_bare" = "1" ]; then
-        filtered+="(bare)\t$path\t$head\t1\t0\n"
+        filtered+="(bare)"$'\t'"$path"$'\t'"$head"$'\t'"1"$'\t'"0"$'\n'
         continue
       fi
       case "$path" in
       "$base"/*)
-        filtered+="$branch\t$path\t$head\t0\t0\n"
+        filtered+="$branch"$'\t'"$path"$'\t'"$head"$'\t'"0"$'\t'"0"$'\n'
         ;;
       esac
     done <<<"$entries"
@@ -1373,12 +1393,12 @@ cmd_ls() {
       archived_base=${rest#*$'\t'}
       case "$path" in
       "$base"/*)
-        filtered+="$branch\t$path\t$head\t0\t1\n"
+        filtered+="$branch"$'\t'"$path"$'\t'"$head"$'\t'"0"$'\t'"1"$'\n'
         continue
         ;;
       esac
       if [ -n "$archived_base" ] && [ "$archived_base" = "$base" ]; then
-        filtered+="$branch\t$path\t$head\t0\t1\n"
+        filtered+="$branch"$'\t'"$path"$'\t'"$head"$'\t'"0"$'\t'"1"$'\n'
       fi
     done <<<"$archived_entries"
   else
@@ -1389,7 +1409,7 @@ cmd_ls() {
       if [ "$is_bare" = "1" ]; then
         branch="(bare)"
       fi
-      filtered+="$branch\t$path\t$head\t$is_bare\t0\n"
+      filtered+="$branch"$'\t'"$path"$'\t'"$head"$'\t'"$is_bare"$'\t'"0"$'\n'
     done <<<"$entries"
     while IFS= read -r entry; do
       [ -n "$entry" ] || continue
@@ -1399,7 +1419,7 @@ cmd_ls() {
       path=${rest%%$'\t'*}
       rest=${rest#*$'\t'}
       head=${rest%%$'\t'*}
-      filtered+="$branch\t$path\t$head\t0\t1\n"
+      filtered+="$branch"$'\t'"$path"$'\t'"$head"$'\t'"0"$'\t'"1"$'\n'
     done <<<"$archived_entries"
   fi
   case "$mode" in
@@ -1432,7 +1452,7 @@ cmd_ls() {
       fi
       first=0
       printf '{"branch":"%s","path":"%s","head":"%s","is_bare":%s,"is_archived":%s}' "$(json_escape "$branch")" "$(json_escape "$path")" "$(json_escape "$head")" "$is_bare_json" "$is_archived_json"
-    done <<<"$(printf '%b' "$filtered")"
+    done <<<"$filtered"
     printf ']\n'
     ;;
   plain)
@@ -1450,7 +1470,7 @@ cmd_ls() {
         label="$branch (archived)"
       fi
       printf '%s\t%s\n' "$label" "$path"
-    done <<<"$(printf '%b' "$filtered")"
+    done <<<"$filtered"
     ;;
   table)
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1468,7 +1488,7 @@ cmd_ls() {
         label="$branch (archived)"
       fi
       printf '%-30s %-60s %s\n' "$label" "$path" "$head"
-    done <<<"$(printf '%b' "$filtered")"
+    done <<<"$filtered"
     ;;
   esac
 }
@@ -1562,7 +1582,7 @@ cmd_archive() {
   fi
   capture_archive_trees "$path"
   archived_at=$(utc_now)
-  git -C "$root" update-ref "$(archive_index_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_TREE"
+  git -C "$root" update-ref "$(archive_index_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_BLOB"
   git -C "$root" update-ref "$(archive_worktree_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_WORKTREE_TREE"
   git -C "$root" update-ref "$(archive_head_ref "$root" "$branch")" "$head_commit"
   write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at"
@@ -1606,9 +1626,9 @@ cmd_unarchive() {
     die "archive metadata incomplete for '$branch'"
   fi
   read_archive_metadata "$root" "$branch"
-  local index_tree worktree_tree
-  if ! index_tree=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$root" "$branch")^{tree}" 2>/dev/null); then
-    die "archive index tree missing for '$branch'"
+  local index_blob worktree_tree
+  if ! index_blob=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$root" "$branch")^{blob}" 2>/dev/null); then
+    die "archive index blob missing for '$branch'"
   fi
   if ! worktree_tree=$(git -C "$root" rev-parse --verify "$(archive_worktree_ref "$root" "$branch")^{tree}" 2>/dev/null); then
     die "archive worktree tree missing for '$branch'"
@@ -1640,7 +1660,7 @@ cmd_unarchive() {
     fi
     die "failed to recreate workspace for '$branch'"
   fi
-  if ! restore_archive_state "$target_path" "$worktree_tree" "$index_tree"; then
+  if ! restore_archive_state "$target_path" "$worktree_tree" "$index_blob"; then
     cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"
     die "failed to restore archive for '$branch'"
   fi
