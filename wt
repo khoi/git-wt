@@ -1689,7 +1689,12 @@ cmd_unarchive() {
     preferred_path=$(normalize_dir "$ARCHIVE_META_WORKTREE_PATH")
   fi
   target_path=$(choose_unarchive_path "$root" "$preferred_path")
-  mkdir -p "$(dirname "$target_path")"
+  if ! mkdir -p "$(dirname "$target_path")"; then
+    if [ "$branch_created" = "1" ]; then
+      git -C "$root" branch -D "$target_branch" >/dev/null 2>&1 || true
+    fi
+    die "failed to prepare workspace path for '$branch'"
+  fi
   if ! git -C "$root" worktree add "$target_path" "$target_branch" >/dev/null; then
     if [ "$branch_created" = "1" ]; then
       git -C "$root" branch -D "$target_branch" >/dev/null 2>&1 || true
