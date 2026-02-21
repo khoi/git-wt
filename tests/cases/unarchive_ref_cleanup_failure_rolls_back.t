@@ -13,10 +13,10 @@ printf 'saved\n' > "$path/saved.txt"
 
 archive_key=$(printf 'feat-ref-cleanup' | git -C "$repo" hash-object --stdin)
 archive_prefix="refs/wt/archive/$archive_key"
-meta_ref="$archive_prefix/meta"
-meta_ref_path=$(git -C "$repo" rev-parse --git-path "$meta_ref")
-mkdir -p "$(dirname "$meta_ref_path")"
-: > "$meta_ref_path.lock"
+index_ref="$archive_prefix/index"
+index_ref_path=$(git -C "$repo" rev-parse --git-path "$index_ref")
+mkdir -p "$(dirname "$index_ref_path")"
+: > "$index_ref_path.lock"
 
 run_cmd "$WT_BIN" unarchive feat-ref-cleanup
 assert_rc 1
@@ -26,11 +26,17 @@ if [ -d "$repo/.worktrees/feat-ref-cleanup" ]; then
   fail "restored worktree leaked after archive ref cleanup failure"
 fi
 
-if ! git -C "$repo" show-ref --verify --quiet "$meta_ref"; then
-  fail "archive metadata ref missing after cleanup failure"
+for ref in "$archive_prefix/meta" "$archive_prefix/index" "$archive_prefix/index-keepalive" "$archive_prefix/worktree" "$archive_prefix/head"; do
+  if ! git -C "$repo" show-ref --verify --quiet "$ref"; then
+    fail "archive ref missing after cleanup failure: $ref"
+  fi
+done
+
+if git -C "$repo" show-ref --verify --quiet refs/heads/feat-ref-cleanup-restored; then
+  fail "restored branch leaked after archive ref cleanup failure"
 fi
 
-rm -f "$meta_ref_path.lock"
+rm -f "$index_ref_path.lock"
 restored=$("$WT_BIN" unarchive feat-ref-cleanup)
 [ -d "$restored" ] || fail "restored worktree missing"
 [ -f "$restored/saved.txt" ] || fail "saved file missing after successful retry"

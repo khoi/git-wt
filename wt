@@ -495,15 +495,32 @@ archive_refs_complete() {
     git -C "$root" show-ref --verify --quiet "$(archive_head_ref "$root" "$branch")"
 }
 
+archive_update_refs() {
+  local root="$1"
+  local input="$2"
+  printf 'start\n%sprepare\ncommit\n' "$input" | git -C "$root" update-ref --stdin >/dev/null 2>&1
+}
+
 archive_delete_refs() {
   local root="$1"
   local branch="$2"
   ARCHIVE_DELETE_FAILED_REF=""
-  local ref
+  local input="" has_refs=0
+  local ref oid
   for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
-    if git -C "$root" update-ref -d "$ref" >/dev/null 2>&1; then
+    if ! oid=$(git -C "$root" rev-parse --verify "${ref}^{object}" 2>/dev/null); then
       continue
     fi
+    input="${input}delete $ref $oid"$'\n'
+    has_refs=1
+  done
+  if [ "$has_refs" -eq 0 ]; then
+    return 0
+  fi
+  if archive_update_refs "$root" "$input"; then
+    return 0
+  fi
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
     if git -C "$root" show-ref --verify --quiet "$ref"; then
       ARCHIVE_DELETE_FAILED_REF="$ref"
       return 1
@@ -527,7 +544,7 @@ write_archive_metadata() {
   meta_oid=$(printf 'version=1\nbranch=%s\nhead_commit=%s\nworktree_path=%s\nbase_dir=%s\narchived_at=%s\n' \
     "$branch" "$head_commit" "$worktree_path" "$base" "$archived_at" |
     git -C "$root" hash-object -w --stdin)
-  git -C "$root" update-ref "$(archive_meta_ref "$root" "$branch")" "$meta_oid"
+  printf '%s\n' "$meta_oid"
 }
 
 ARCHIVE_META_VERSION=""
@@ -1621,11 +1638,17 @@ cmd_archive() {
   fi
   capture_archive_trees "$path"
   archived_at=$(utc_now)
-  git -C "$root" update-ref "$(archive_index_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_BLOB"
-  git -C "$root" update-ref "$(archive_index_keepalive_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE"
-  git -C "$root" update-ref "$(archive_worktree_ref "$root" "$branch")" "$ARCHIVE_CAPTURE_WORKTREE_TREE"
-  git -C "$root" update-ref "$(archive_head_ref "$root" "$branch")" "$head_commit"
-  write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at"
+  local meta_oid
+  meta_oid=$(write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at")
+  local ref_input=""
+  ref_input="${ref_input}create $(archive_index_ref "$root" "$branch") $ARCHIVE_CAPTURE_INDEX_BLOB"$'\n'
+  ref_input="${ref_input}create $(archive_index_keepalive_ref "$root" "$branch") $ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE"$'\n'
+  ref_input="${ref_input}create $(archive_worktree_ref "$root" "$branch") $ARCHIVE_CAPTURE_WORKTREE_TREE"$'\n'
+  ref_input="${ref_input}create $(archive_head_ref "$root" "$branch") $head_commit"$'\n'
+  ref_input="${ref_input}create $(archive_meta_ref "$root" "$branch") $meta_oid"$'\n'
+  if ! archive_update_refs "$root" "$ref_input"; then
+    die "failed to write archive refs for '$branch'"
+  fi
   git -C "$root" worktree remove --force "$path" >/dev/null 2>&1 || true
   git -C "$root" worktree prune >/dev/null 2>&1 || true
   if find_worktree_by_branch "$root" "$branch" >/dev/null; then
