@@ -8,14 +8,24 @@ repo="$REPO"
 
 cd "$repo"
 path=$("$WT_BIN" switch feat-submodule-roundtrip --from main)
+git -C "$path" -c protocol.file.allow=always submodule update --init --recursive >/dev/null
+printf 'saved\n' > "$path/saved.txt"
+git -C "$path" add saved.txt
+
 run_cmd "$WT_BIN" archive feat-submodule-roundtrip
-assert_rc 1
-assert_match "submodules are not supported by archive/unarchive" "$RUN_ERR"
+assert_rc 0
+assert_match "submodules are ignored by archive/unarchive" "$RUN_ERR"
+[ "$RUN_OUT" = "$path" ] || fail "unexpected archived path"
+[ ! -d "$path" ] || fail "worktree path still exists after archive"
 
-[ -d "$path" ] || fail "worktree path missing after failed archive"
+run_cmd "$WT_BIN" unarchive feat-submodule-roundtrip
+assert_rc 0
+assert_match "submodules are ignored by archive/unarchive" "$RUN_ERR"
+restored="$RUN_OUT"
+[ -d "$restored" ] || fail "restored worktree missing"
 
-archive_key=$(printf 'feat-submodule-roundtrip' | git -C "$repo" hash-object --stdin)
-archive_prefix="refs/wt/archive/$archive_key"
-if git -C "$repo" show-ref --verify --quiet "$archive_prefix/meta"; then
-  fail "archive metadata ref should not exist when submodules are unsupported"
-fi
+status=$(git -C "$restored" status --porcelain)
+assert_match "A  saved.txt" "$status"
+
+run_cmd git -C "$restored" -c protocol.file.allow=always submodule status
+assert_rc 0

@@ -109,7 +109,7 @@ Flags:
   -h, --help      show help
 
 Notes:
-  submodules are not supported by archive/unarchive
+  submodules are ignored by archive/unarchive
 USAGE
 }
 
@@ -122,7 +122,7 @@ Flags:
   -h, --help      show help
 
 Notes:
-  submodules are not supported by archive/unarchive
+  submodules are ignored by archive/unarchive
 USAGE
 }
 
@@ -629,7 +629,7 @@ capture_archive_index_keepalive_tree() {
       rm -f "$tmp_index"
       return 1
     fi
-  done < <(git -C "$path" ls-files --stage | awk '{print $2}' | sort -u)
+  done < <(git -C "$path" ls-files --stage | awk '$1 != "160000" {print $2}' | sort -u)
   local tree
   if ! tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$path" write-tree); then
     rm -f "$tmp_index"
@@ -709,6 +709,10 @@ tree_has_submodules() {
   local root="$1"
   local tree="$2"
   git -C "$root" ls-tree -r "$tree" | awk '$1 == "160000" {found=1; exit} END {exit found ? 0 : 1}'
+}
+
+warn_submodules_ignored() {
+  printf '%s\n' "warning: submodules are ignored by archive/unarchive" >&2
 }
 
 choose_unarchive_branch() {
@@ -834,7 +838,7 @@ restore_archive_state() {
   if ! index_path=$(git -C "$path" rev-parse --git-path index); then
     return 1
   fi
-  if ! git -C "$path" read-tree --reset -u "$worktree_tree"; then
+  if ! git -C "$path" read-tree --reset -u --no-recurse-submodules "$worktree_tree"; then
     return 1
   fi
   if ! git -C "$path" cat-file blob "$index_blob" >"$index_path"; then
@@ -1751,7 +1755,7 @@ cmd_archive() {
     die "cannot archive main worktree"
   fi
   if worktree_has_submodules "$path"; then
-    die "submodules are not supported by archive/unarchive"
+    warn_submodules_ignored
   fi
   if archive_has_any_refs "$root" "$branch"; then
     die "archive already exists: '$branch'"
@@ -1824,7 +1828,7 @@ cmd_unarchive() {
     die "archive worktree tree missing for '$branch'"
   fi
   if tree_has_submodules "$root" "$worktree_tree"; then
-    die "submodules are not supported by archive/unarchive"
+    warn_submodules_ignored
   fi
   local archived_head
   if ! archived_head=$(git -C "$root" rev-parse --verify "$(archive_head_ref "$root" "$branch")^{commit}" 2>/dev/null); then
