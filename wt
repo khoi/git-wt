@@ -439,6 +439,12 @@ archive_head_ref() {
   printf '%s/head\n' "$(archive_ref_prefix "$root" "$branch")"
 }
 
+archive_sparse_ref() {
+  local root="$1"
+  local branch="$2"
+  printf '%s/sparse\n' "$(archive_ref_prefix "$root" "$branch")"
+}
+
 archive_entries() {
   local root="$1"
   local ref branch content meta_branch="" meta_head="" meta_path="" meta_base="" line key value
@@ -477,7 +483,7 @@ archive_has_any_refs() {
   local root="$1"
   local branch="$2"
   local ref
-  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")" "$(archive_sparse_ref "$root" "$branch")"; do
     if git -C "$root" show-ref --verify --quiet "$ref"; then
       return 0
     fi
@@ -492,7 +498,8 @@ archive_refs_complete() {
     git -C "$root" show-ref --verify --quiet "$(archive_index_ref "$root" "$branch")" &&
     git -C "$root" show-ref --verify --quiet "$(archive_index_keepalive_ref "$root" "$branch")" &&
     git -C "$root" show-ref --verify --quiet "$(archive_worktree_ref "$root" "$branch")" &&
-    git -C "$root" show-ref --verify --quiet "$(archive_head_ref "$root" "$branch")"
+    git -C "$root" show-ref --verify --quiet "$(archive_head_ref "$root" "$branch")" &&
+    git -C "$root" show-ref --verify --quiet "$(archive_sparse_ref "$root" "$branch")"
 }
 
 archive_update_refs() {
@@ -507,7 +514,7 @@ archive_delete_refs() {
   ARCHIVE_DELETE_FAILED_REF=""
   local input="" has_refs=0
   local ref oid
-  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")" "$(archive_sparse_ref "$root" "$branch")"; do
     if ! oid=$(git -C "$root" rev-parse --verify "${ref}^{object}" 2>/dev/null); then
       continue
     fi
@@ -520,7 +527,7 @@ archive_delete_refs() {
   if archive_update_refs "$root" "$input"; then
     return 0
   fi
-  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")"; do
+  for ref in "$(archive_meta_ref "$root" "$branch")" "$(archive_index_ref "$root" "$branch")" "$(archive_index_keepalive_ref "$root" "$branch")" "$(archive_worktree_ref "$root" "$branch")" "$(archive_head_ref "$root" "$branch")" "$(archive_sparse_ref "$root" "$branch")"; do
     if git -C "$root" show-ref --verify --quiet "$ref"; then
       ARCHIVE_DELETE_FAILED_REF="$ref"
       return 1
@@ -540,9 +547,11 @@ write_archive_metadata() {
   local worktree_path="$4"
   local base="$5"
   local archived_at="$6"
+  local sparse_checkout="${7:-false}"
+  local sparse_checkout_cone="${8:-}"
   local meta_oid
-  meta_oid=$(printf 'version=1\nbranch=%s\nhead_commit=%s\nworktree_path=%s\nbase_dir=%s\narchived_at=%s\n' \
-    "$branch" "$head_commit" "$worktree_path" "$base" "$archived_at" |
+  meta_oid=$(printf 'version=1\nbranch=%s\nhead_commit=%s\nworktree_path=%s\nbase_dir=%s\narchived_at=%s\nsparse_checkout=%s\nsparse_checkout_cone=%s\n' \
+    "$branch" "$head_commit" "$worktree_path" "$base" "$archived_at" "$sparse_checkout" "$sparse_checkout_cone" |
     git -C "$root" hash-object -w --stdin)
   printf '%s\n' "$meta_oid"
 }
@@ -553,6 +562,8 @@ ARCHIVE_META_HEAD_COMMIT=""
 ARCHIVE_META_WORKTREE_PATH=""
 ARCHIVE_META_BASE_DIR=""
 ARCHIVE_META_ARCHIVED_AT=""
+ARCHIVE_META_SPARSE_CHECKOUT=""
+ARCHIVE_META_SPARSE_CHECKOUT_CONE=""
 
 read_archive_metadata() {
   local root="$1"
@@ -567,6 +578,8 @@ read_archive_metadata() {
   ARCHIVE_META_WORKTREE_PATH=""
   ARCHIVE_META_BASE_DIR=""
   ARCHIVE_META_ARCHIVED_AT=""
+  ARCHIVE_META_SPARSE_CHECKOUT=""
+  ARCHIVE_META_SPARSE_CHECKOUT_CONE=""
   local line key value
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
@@ -579,12 +592,23 @@ read_archive_metadata() {
     worktree_path) ARCHIVE_META_WORKTREE_PATH="$value" ;;
     base_dir) ARCHIVE_META_BASE_DIR="$value" ;;
     archived_at) ARCHIVE_META_ARCHIVED_AT="$value" ;;
+    sparse_checkout) ARCHIVE_META_SPARSE_CHECKOUT="$value" ;;
+    sparse_checkout_cone) ARCHIVE_META_SPARSE_CHECKOUT_CONE="$value" ;;
     esac
   done <<< "$content"
   [ "$ARCHIVE_META_VERSION" = "1" ] || die "unsupported archive metadata version for '$branch'"
   [ "$ARCHIVE_META_BRANCH" = "$branch" ] || die "archive metadata mismatch for '$branch'"
   [ -n "$ARCHIVE_META_HEAD_COMMIT" ] || die "archive metadata missing head_commit for '$branch'"
   [ -n "$ARCHIVE_META_WORKTREE_PATH" ] || die "archive metadata missing worktree_path for '$branch'"
+  if [ -z "$ARCHIVE_META_SPARSE_CHECKOUT" ]; then
+    ARCHIVE_META_SPARSE_CHECKOUT="false"
+  fi
+  if [ "$ARCHIVE_META_SPARSE_CHECKOUT" != "true" ] && [ "$ARCHIVE_META_SPARSE_CHECKOUT" != "false" ]; then
+    die "archive metadata invalid sparse_checkout for '$branch'"
+  fi
+  if [ -n "$ARCHIVE_META_SPARSE_CHECKOUT_CONE" ] && [ "$ARCHIVE_META_SPARSE_CHECKOUT_CONE" != "true" ] && [ "$ARCHIVE_META_SPARSE_CHECKOUT_CONE" != "false" ]; then
+    die "archive metadata invalid sparse_checkout_cone for '$branch'"
+  fi
 }
 
 capture_archive_index_keepalive_tree() {
@@ -632,6 +656,35 @@ capture_archive_trees() {
     die "failed to capture archive state"
   fi
   rm -f "$tmp_index"
+}
+
+capture_archive_sparse_state() {
+  local path="$1"
+  local sparse_checkout sparse_checkout_cone sparse_path
+  sparse_checkout=$(git -C "$path" config --bool --get core.sparseCheckout 2>/dev/null || true)
+  case "$sparse_checkout" in
+  true|false) ;;
+  *) sparse_checkout="false" ;;
+  esac
+  sparse_checkout_cone=$(git -C "$path" config --bool --get core.sparseCheckoutCone 2>/dev/null || true)
+  case "$sparse_checkout_cone" in
+  true|false) ;;
+  *) sparse_checkout_cone="" ;;
+  esac
+  if ! sparse_path=$(git -C "$path" rev-parse --git-path info/sparse-checkout); then
+    die "failed to capture archive state"
+  fi
+  if [ -f "$sparse_path" ]; then
+    if ! ARCHIVE_CAPTURE_SPARSE_BLOB=$(git -C "$path" hash-object -w "$sparse_path"); then
+      die "failed to capture archive state"
+    fi
+  else
+    if ! ARCHIVE_CAPTURE_SPARSE_BLOB=$(printf '' | git -C "$path" hash-object -w --stdin); then
+      die "failed to capture archive state"
+    fi
+  fi
+  ARCHIVE_CAPTURE_SPARSE_CHECKOUT="$sparse_checkout"
+  ARCHIVE_CAPTURE_SPARSE_CHECKOUT_CONE="$sparse_checkout_cone"
 }
 
 choose_unarchive_branch() {
@@ -765,6 +818,52 @@ restore_archive_state() {
   fi
   if ! git -C "$path" cat-file blob "$index_blob" | GIT_INDEX_FILE="$index_path" git -C "$path" update-index --index-info; then
     return 1
+  fi
+}
+
+set_sparse_checkout_value() {
+  local path="$1"
+  local key="$2"
+  local value="$3"
+  if git -C "$path" config --worktree "$key" "$value" >/dev/null 2>&1; then
+    return 0
+  fi
+  git -C "$path" config "$key" "$value" >/dev/null 2>&1
+}
+
+unset_sparse_checkout_value() {
+  local path="$1"
+  local key="$2"
+  if git -C "$path" config --worktree --unset "$key" >/dev/null 2>&1; then
+    return 0
+  fi
+  git -C "$path" config --unset "$key" >/dev/null 2>&1 || true
+}
+
+restore_archive_sparse_state() {
+  local path="$1"
+  local sparse_blob="$2"
+  local sparse_checkout="$3"
+  local sparse_checkout_cone="$4"
+  local sparse_path
+  if ! sparse_path=$(git -C "$path" rev-parse --git-path info/sparse-checkout); then
+    return 1
+  fi
+  if ! mkdir -p "$(dirname "$sparse_path")"; then
+    return 1
+  fi
+  if ! git -C "$path" cat-file blob "$sparse_blob" >"$sparse_path"; then
+    return 1
+  fi
+  if ! set_sparse_checkout_value "$path" core.sparseCheckout "$sparse_checkout"; then
+    return 1
+  fi
+  if [ -n "$sparse_checkout_cone" ]; then
+    if ! set_sparse_checkout_value "$path" core.sparseCheckoutCone "$sparse_checkout_cone"; then
+      return 1
+    fi
+  else
+    unset_sparse_checkout_value "$path" core.sparseCheckoutCone
   fi
 }
 
@@ -1637,14 +1736,16 @@ cmd_archive() {
     die "branch not found: '$branch'"
   fi
   capture_archive_trees "$path"
+  capture_archive_sparse_state "$path"
   archived_at=$(utc_now)
   local meta_oid
-  meta_oid=$(write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at")
+  meta_oid=$(write_archive_metadata "$root" "$branch" "$head_commit" "$path" "$base" "$archived_at" "$ARCHIVE_CAPTURE_SPARSE_CHECKOUT" "$ARCHIVE_CAPTURE_SPARSE_CHECKOUT_CONE")
   local ref_input=""
   ref_input="${ref_input}create $(archive_index_ref "$root" "$branch") $ARCHIVE_CAPTURE_INDEX_BLOB"$'\n'
   ref_input="${ref_input}create $(archive_index_keepalive_ref "$root" "$branch") $ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE"$'\n'
   ref_input="${ref_input}create $(archive_worktree_ref "$root" "$branch") $ARCHIVE_CAPTURE_WORKTREE_TREE"$'\n'
   ref_input="${ref_input}create $(archive_head_ref "$root" "$branch") $head_commit"$'\n'
+  ref_input="${ref_input}create $(archive_sparse_ref "$root" "$branch") $ARCHIVE_CAPTURE_SPARSE_BLOB"$'\n'
   ref_input="${ref_input}create $(archive_meta_ref "$root" "$branch") $meta_oid"$'\n'
   if ! archive_update_refs "$root" "$ref_input"; then
     die "failed to write archive refs for '$branch'"
@@ -1688,7 +1789,7 @@ cmd_unarchive() {
     die "archive metadata incomplete for '$branch'"
   fi
   read_archive_metadata "$root" "$branch"
-  local index_blob worktree_tree
+  local index_blob worktree_tree sparse_blob
   if ! index_blob=$(git -C "$root" rev-parse --verify "$(archive_index_ref "$root" "$branch")^{blob}" 2>/dev/null); then
     die "archive index blob missing for '$branch'"
   fi
@@ -1701,6 +1802,9 @@ cmd_unarchive() {
   local archived_head
   if ! archived_head=$(git -C "$root" rev-parse --verify "$(archive_head_ref "$root" "$branch")^{commit}" 2>/dev/null); then
     die "archive head commit missing for '$branch'"
+  fi
+  if ! sparse_blob=$(git -C "$root" rev-parse --verify "$(archive_sparse_ref "$root" "$branch")^{blob}" 2>/dev/null); then
+    die "archive sparse state missing for '$branch'"
   fi
   if [ -n "$ARCHIVE_META_HEAD_COMMIT" ] && [ "$ARCHIVE_META_HEAD_COMMIT" != "$archived_head" ]; then
     die "archive metadata mismatch for '$branch'"
@@ -1732,6 +1836,10 @@ cmd_unarchive() {
       git -C "$root" branch -D "$target_branch" >/dev/null 2>&1 || true
     fi
     die "failed to recreate workspace for '$branch'"
+  fi
+  if ! restore_archive_sparse_state "$target_path" "$sparse_blob" "$ARCHIVE_META_SPARSE_CHECKOUT" "$ARCHIVE_META_SPARSE_CHECKOUT_CONE"; then
+    cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"
+    die "failed to restore sparse state for '$branch'"
   fi
   if ! restore_archive_state "$target_path" "$worktree_tree" "$index_blob"; then
     cleanup_unarchive_failure "$root" "$target_path" "$target_branch" "$branch_created"

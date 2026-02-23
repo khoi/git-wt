@@ -46,6 +46,9 @@ fi
 if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/head"; then
   fail "archive head ref missing"
 fi
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/sparse"; then
+  fail "archive sparse ref missing"
+fi
 
 restored=$("$WT_BIN" unarchive feat-archive)
 [ -d "$restored" ] || fail "restored worktree missing"
@@ -72,4 +75,7 @@ if git -C "$repo" show-ref --verify --quiet "$archive_prefix/worktree"; then
 fi
 if git -C "$repo" show-ref --verify --quiet "$archive_prefix/head"; then
   fail "archive head ref still exists"
+fi
+if git -C "$repo" show-ref --verify --quiet "$archive_prefix/sparse"; then
+  fail "archive sparse ref still exists"
 fi

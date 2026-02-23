@@ -26,7 +26,7 @@ if [ -d "$repo/.worktrees/feat-ref-cleanup" ]; then
   fail "restored worktree leaked after archive ref cleanup failure"
 fi
 
-for ref in "$archive_prefix/meta" "$archive_prefix/index" "$archive_prefix/index-keepalive" "$archive_prefix/worktree" "$archive_prefix/head"; do
+for ref in "$archive_prefix/meta" "$archive_prefix/index" "$archive_prefix/index-keepalive" "$archive_prefix/worktree" "$archive_prefix/head" "$archive_prefix/sparse"; do
   if ! git -C "$repo" show-ref --verify --quiet "$ref"; then
     fail "archive ref missing after cleanup failure: $ref"
   fi

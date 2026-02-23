@@ -23,7 +23,7 @@ assert_rc 1
 assert_match "failed to write archive refs for 'feat-archive-atomic'" "$RUN_ERR"
 
 [ -d "$path" ] || fail "workspace removed after failed archive ref write"
-for ref in "$archive_prefix/meta" "$archive_prefix/index" "$archive_prefix/index-keepalive" "$archive_prefix/worktree" "$archive_prefix/head"; do
+for ref in "$archive_prefix/meta" "$archive_prefix/index" "$archive_prefix/index-keepalive" "$archive_prefix/worktree" "$archive_prefix/head" "$archive_prefix/sparse"; do
   if git -C "$repo" show-ref --verify --quiet "$ref"; then
     fail "archive ref unexpectedly created after failed archive write: $ref"
   fi

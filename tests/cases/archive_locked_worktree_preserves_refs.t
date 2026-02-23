@@ -37,3 +37,6 @@ fi
 if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/head"; then
   fail "archive head ref missing after failed archive"
 fi
+if ! git -C "$repo" show-ref --verify --quiet "$archive_prefix/sparse"; then
+  fail "archive sparse ref missing after failed archive"
+fi
