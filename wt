@@ -635,7 +635,14 @@ capture_archive_index_keepalive_tree() {
 
 capture_archive_trees() {
   local path="$1"
-  if ! ARCHIVE_CAPTURE_INDEX_BLOB=$(git -C "$path" ls-files --stage | git -C "$path" hash-object -w --stdin); then
+  local index_path
+  if ! index_path=$(git -C "$path" rev-parse --git-path index); then
+    die "failed to capture archive state"
+  fi
+  if ! git -C "$path" update-index --no-split-index >/dev/null 2>&1; then
+    die "failed to capture archive state"
+  fi
+  if ! ARCHIVE_CAPTURE_INDEX_BLOB=$(git -C "$path" hash-object -w "$index_path"); then
     die "failed to capture archive state"
   fi
   if ! ARCHIVE_CAPTURE_INDEX_KEEPALIVE_TREE=$(capture_archive_index_keepalive_tree "$path"); then
@@ -813,10 +820,7 @@ restore_archive_state() {
   if ! git -C "$path" read-tree --reset -u --no-recurse-submodules "$worktree_tree"; then
     return 1
   fi
-  if ! GIT_INDEX_FILE="$index_path" git -C "$path" read-tree --empty >/dev/null; then
-    return 1
-  fi
-  if ! git -C "$path" cat-file blob "$index_blob" | GIT_INDEX_FILE="$index_path" git -C "$path" update-index --index-info; then
+  if ! git -C "$path" cat-file blob "$index_blob" >"$index_path"; then
     return 1
   fi
 }

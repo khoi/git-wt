@@ -35,3 +35,4 @@ assert_match "app" "$RUN_OUT"
 
 status=$(git -C "$restored" status --porcelain)
 assert_match "MM app/keep.txt" "$status"
+assert_not_match "docs/drop.txt" "$status"
